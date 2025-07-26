@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Play, Pause, RotateCcw } from 'lucide-react';
 
+interface PacManProps {
+  onScoreUpdate?: (score: number) => void;
+}
+
 const MAZE_WIDTH = 21;
 const MAZE_HEIGHT = 21;
 const CELL_SIZE = 20;
@@ -43,7 +47,7 @@ const INITIAL_MAZE: CellType[][] = [
   [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
 ];
 
-const PacMan: React.FC = () => {
+const PacMan: React.FC<PacManProps> = ({ onScoreUpdate }) => {
   const [maze, setMaze] = useState<CellType[][]>(() => 
     INITIAL_MAZE.map(row => [...row])
   );
@@ -115,6 +119,9 @@ const PacMan: React.FC = () => {
       const dotsRemaining = maze.flat().some(cell => cell === 1 || cell === 3);
       if (!dotsRemaining) {
         setGameOver(true);
+        if (onScoreUpdate) {
+          onScoreUpdate(score);
+        }
       }
     }
   }, [pacman, maze, gameOver, paused]);
@@ -163,6 +170,9 @@ const PacMan: React.FC = () => {
         // Remove collided ghost (simplified - in real Pac-Man they respawn)
       } else {
         setGameOver(true);
+        if (onScoreUpdate) {
+          onScoreUpdate(score);
+        }
       }
     }
   }, [ghosts, pacman, gameOver, paused, powerMode]);

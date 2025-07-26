@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Play, Pause, RotateCcw } from 'lucide-react';
 
+interface SnakeProps {
+  onScoreUpdate?: (score: number) => void;
+}
+
 interface Position {
   x: number;
   y: number;
@@ -11,7 +15,7 @@ type Direction = 'UP' | 'DOWN' | 'LEFT' | 'RIGHT';
 const BOARD_SIZE = 20;
 const CELL_SIZE = 20;
 
-const Snake: React.FC = () => {
+const Snake: React.FC<SnakeProps> = ({ onScoreUpdate }) => {
   const [snake, setSnake] = useState<Position[]>([{ x: 10, y: 10 }]);
   const [food, setFood] = useState<Position>({ x: 15, y: 15 });
   const [direction, setDirection] = useState<Direction>('RIGHT');
@@ -64,12 +68,18 @@ const Snake: React.FC = () => {
       // Check wall collision
       if (head.x < 0 || head.x >= BOARD_SIZE || head.y < 0 || head.y >= BOARD_SIZE) {
         setGameOver(true);
+        if (onScoreUpdate) {
+          onScoreUpdate(score);
+        }
         return currentSnake;
       }
 
       // Check self collision
       if (newSnake.some(segment => segment.x === head.x && segment.y === head.y)) {
         setGameOver(true);
+        if (onScoreUpdate) {
+          onScoreUpdate(score);
+        }
         return currentSnake;
       }
 

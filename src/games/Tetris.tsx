@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Play, Pause, RotateCcw } from 'lucide-react';
 
+interface TetrisProps {
+  onScoreUpdate?: (score: number) => void;
+}
+
 const BOARD_WIDTH = 10;
 const BOARD_HEIGHT = 20;
 const CELL_SIZE = 25;
@@ -28,7 +32,7 @@ interface Position {
   y: number;
 }
 
-const Tetris: React.FC = () => {
+const Tetris: React.FC<TetrisProps> = ({ onScoreUpdate }) => {
   const [board, setBoard] = useState<string[][]>(() =>
     Array(BOARD_HEIGHT).fill(null).map(() => Array(BOARD_WIDTH).fill(''))
   );
@@ -134,6 +138,9 @@ const Tetris: React.FC = () => {
     
     if (!isValidPosition(nextPiece, newPosition)) {
       setGameOver(true);
+      if (onScoreUpdate) {
+        onScoreUpdate(score);
+      }
       return;
     }
     

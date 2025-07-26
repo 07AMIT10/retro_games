@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Play, Pause, RotateCcw } from 'lucide-react';
 
+interface SpaceInvadersProps {
+  onScoreUpdate?: (score: number) => void;
+}
+
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
 const PLAYER_WIDTH = 40;
@@ -23,7 +27,7 @@ interface Invader extends Position {
   active: boolean;
 }
 
-const SpaceInvaders: React.FC = () => {
+const SpaceInvaders: React.FC<SpaceInvadersProps> = ({ onScoreUpdate }) => {
   const [player, setPlayer] = useState<Position>({ 
     x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, 
     y: CANVAS_HEIGHT - 50 
@@ -215,6 +219,9 @@ const SpaceInvaders: React.FC = () => {
             const newLives = prev - 1;
             if (newLives <= 0) {
               setGameOver(true);
+              if (onScoreUpdate) {
+                onScoreUpdate(score);
+              }
             }
             return newLives;
           });
@@ -235,6 +242,9 @@ const SpaceInvaders: React.FC = () => {
 
     if (reachedPlayer) {
       setGameOver(true);
+      if (onScoreUpdate) {
+        onScoreUpdate(score);
+      }
     }
   }, [invaders, player, gameOver, paused]);
 

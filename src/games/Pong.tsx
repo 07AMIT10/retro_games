@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Play, Pause, RotateCcw } from 'lucide-react';
 
+interface PongProps {
+  onScoreUpdate?: (score: number) => void;
+}
+
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 400;
 const PADDLE_WIDTH = 10;
@@ -19,7 +23,7 @@ interface Velocity {
   y: number;
 }
 
-const Pong: React.FC = () => {
+const Pong: React.FC<PongProps> = ({ onScoreUpdate }) => {
   const [leftPaddle, setLeftPaddle] = useState<Position>({ 
     x: 20, 
     y: CANVAS_HEIGHT / 2 - PADDLE_HEIGHT / 2 
@@ -129,6 +133,9 @@ const Pong: React.FC = () => {
           const newScore = prev + 1;
           if (newScore >= 10) {
             setGameOver(true);
+            if (onScoreUpdate) {
+              onScoreUpdate(newScore * 100);
+            }
           }
           return newScore;
         });
@@ -141,6 +148,9 @@ const Pong: React.FC = () => {
           const newScore = prev + 1;
           if (newScore >= 10) {
             setGameOver(true);
+            if (onScoreUpdate) {
+              onScoreUpdate(newScore * 100);
+            }
           }
           return newScore;
         });
