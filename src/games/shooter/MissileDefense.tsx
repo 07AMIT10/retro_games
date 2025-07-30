@@ -214,7 +214,7 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
 
     // Explosion vs missiles
     setMissiles(prevMissiles => {
-      let newMissiles = [...prevMissiles];
+      const newMissiles = [...prevMissiles];
       let pointsEarned = 0;
 
       explosions.forEach(explosion => {

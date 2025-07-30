@@ -248,7 +248,7 @@ const LaserDefense: React.FC<LaserDefenseProps> = ({ onScoreUpdate }) => {
     setAliens(prev => prev.map(alien => {
       if (!alien.active) return alien;
 
-      let newX = alien.x + alien.vx;
+      const newX = alien.x + alien.vx;
       let newY = alien.y + alien.vy;
       let newVx = alien.vx;
       let newVy = alien.vy;
@@ -399,10 +399,10 @@ const LaserDefense: React.FC<LaserDefenseProps> = ({ onScoreUpdate }) => {
 
     // Player bullets vs aliens
     setBullets(prevBullets => {
-      let newBullets = [...prevBullets];
+      const newBullets = [...prevBullets];
       
       setAliens(prevAliens => {
-        let newAliens = [...prevAliens];
+        const newAliens = [...prevAliens];
         let pointsEarned = 0;
 
         newBullets.forEach((bullet, bulletIndex) => {

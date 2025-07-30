@@ -244,10 +244,10 @@ const SpaceInvaders: React.FC<SpaceInvadersProps> = ({ onScoreUpdate }) => {
 
     // Player bullets vs invaders
     setBullets(prevBullets => {
-      let newBullets = [...prevBullets];
+      const newBullets = [...prevBullets];
       
       setInvaders(prevInvaders => {
-        let newInvaders = [...prevInvaders];
+        const newInvaders = [...prevInvaders];
         let pointsEarned = 0;
 
         newBullets.forEach((bullet, bulletIndex) => {
@@ -288,7 +288,7 @@ const SpaceInvaders: React.FC<SpaceInvadersProps> = ({ onScoreUpdate }) => {
 
     // Bullets vs barriers
     setBullets(prevBullets => {
-      let newBullets = [...prevBullets];
+      const newBullets = [...prevBullets];
       
       setBarriers(prevBarriers => {
         return prevBarriers.map(barrier => {
@@ -351,7 +351,7 @@ const SpaceInvaders: React.FC<SpaceInvadersProps> = ({ onScoreUpdate }) => {
 
     // Invader bullets vs barriers
     setInvaderBullets(prevBullets => {
-      let newBullets = [...prevBullets];
+      const newBullets = [...prevBullets];
       
       setBarriers(prevBarriers => {
         return prevBarriers.map(barrier => {

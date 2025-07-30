@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Gamepad2, Filter, Home, Play, Trophy, Zap, Car, Target, Puzzle } from 'lucide-react';
+import { Gamepad2, Home, Play, Zap, Car, Target, Puzzle } from 'lucide-react';
 
 // Import all games
 import Snake from './games/arcade/Snake';

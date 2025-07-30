@@ -153,10 +153,10 @@ const Centipede: React.FC<CentipedeProps> = ({ onScoreUpdate }) => {
 
     // Bullet vs Centipede
     setBullets(prevBullets => {
-      let newBullets = [...prevBullets];
+      const newBullets = [...prevBullets];
       
       setCentipede(prevSegments => {
-        let newSegments = [...prevSegments];
+        const newSegments = [...prevSegments];
         let pointsEarned = 0;
 
         newBullets.forEach((bullet, bulletIndex) => {
@@ -198,10 +198,10 @@ const Centipede: React.FC<CentipedeProps> = ({ onScoreUpdate }) => {
 
     // Bullet vs Mushroom
     setBullets(prevBullets => {
-      let newBullets = [...prevBullets];
+      const newBullets = [...prevBullets];
       
       setMushrooms(prevMushrooms => {
-        let newMushrooms = [...prevMushrooms];
+        const newMushrooms = [...prevMushrooms];
 
         newBullets.forEach((bullet, bulletIndex) => {
           if (!bullet.active) return;

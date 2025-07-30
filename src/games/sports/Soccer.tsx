@@ -237,7 +237,7 @@ const Soccer: React.FC<SoccerProps> = ({ onScoreUpdate }) => {
       let newY = prev.y + prev.vy;
       let newVx = prev.vx * 0.988; // air resistance
       let newVy = prev.vy * 0.988;
-      let newSpin = prev.spin * 0.95;
+      const newSpin = prev.spin * 0.95;
       let newBounces = prev.bounces;
 
       // Apply gravity

@@ -268,10 +268,10 @@ const Galaga: React.FC<GalagaProps> = ({ onScoreUpdate }) => {
 
     // Player bullets vs enemies
     setBullets(prevBullets => {
-      let newBullets = [...prevBullets];
+      const newBullets = [...prevBullets];
       
       setEnemies(prevEnemies => {
-        let newEnemies = [...prevEnemies];
+        const newEnemies = [...prevEnemies];
         let pointsEarned = 0;
 
         newBullets.forEach((bullet, bulletIndex) => {
@@ -433,4 +433,125 @@ const Galaga: React.FC<GalagaProps> = ({ onScoreUpdate }) => {
   }, [updatePlayer, updateBullets, updateEnemies, checkCollisions]);
 
   const getEnemyColor = (enemy: Enemy) => {
-    if
+    if (!enemy.active) return 'transparent';
+    if (enemy.health > 1) return '#ff8080'; // Damaged color
+    switch (enemy.type) {
+      case 'bee':
+        return '#61dafb';
+      case 'butterfly':
+        return '#ffcc00';
+      case 'boss':
+        return '#ff4d4d';
+      default:
+        return '#ffffff';
+    }
+  };
+
+  return (
+    <div className="w-full h-full bg-gray-800 flex flex-col items-center justify-center font-mono">
+      <div className="absolute top-4 left-4 text-white">
+        <div>Score: {score}</div>
+        <div>Lives: {lives}</div>
+        <div>Level: {level}</div>
+      </div>
+      <div className="relative" style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}>
+        <canvas id="gameCanvas" className="w-full h-full" />
+        {enemies.map((enemy, index) => (
+          <div
+            key={index}
+            className="absolute"
+            style={{
+              left: enemy.x,
+              top: enemy.y,
+              width: ENEMY_WIDTH,
+              height: ENEMY_HEIGHT,
+              backgroundColor: getEnemyColor(enemy),
+              transition: 'transform 0.1s',
+              transform: `rotate(${enemy.angle}rad)`,
+              pointerEvents: 'none'
+            }}
+          />
+        ))}
+        {bullets.map((bullet, index) => (
+          <div
+            key={index}
+            className="absolute"
+            style={{
+              left: bullet.x,
+              top: bullet.y,
+              width: BULLET_SIZE,
+              height: BULLET_SIZE,
+              backgroundColor: '#ffffff',
+              borderRadius: '50%',
+              pointerEvents: 'none'
+            }}
+          />
+        ))}
+        {enemyBullets.map((bullet, index) => (
+          <div
+            key={index}
+            className="absolute"
+            style={{
+              left: bullet.x,
+              top: bullet.y,
+              width: BULLET_SIZE,
+              height: BULLET_SIZE,
+              backgroundColor: '#ff0000',
+              borderRadius: '50%',
+              pointerEvents: 'none'
+            }}
+          />
+        ))}
+        <div
+          className="absolute"
+          style={{
+            left: player.x,
+            top: player.y,
+            width: PLAYER_WIDTH,
+            height: PLAYER_HEIGHT,
+            backgroundColor: '#00ff00',
+            transition: 'transform 0.1s',
+            transform: `rotate(${Math.PI / 2}rad)`,
+            pointerEvents: 'none'
+          }}
+        />
+      </div>
+      <div className="mt-4">
+        {gameOver ? (
+          <div className="text-white">
+            Game Over
+            <div>Your score: {score}</div>
+            <button
+              onClick={resetGame}
+              className="mt-2 px-4 py-2 bg-blue-500 rounded"
+            >
+              Restart
+            </button>
+          </div>
+        ) : paused ? (
+          <div className="text-white">Paused</div>
+        ) : (
+          <div className="text-white">Galaga - React Version</div>
+        )}
+      </div>
+      <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-white">
+        <button
+          onClick={resetGame}
+          className="px-4 py-2 bg-green-500 rounded mr-2"
+        >
+          <RotateCcw className="inline-block mr-1" />
+          Reset
+        </button>
+        <button
+          onClick={() => setPaused(prev => !prev)}
+          className="px-4 py-2 bg-yellow-500 rounded"
+        >
+          {paused ? <Play className="inline-block mr-1" /> : <Pause className="inline-block mr-1" />}
+          {paused ? 'Resume' : 'Pause'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default Galaga;

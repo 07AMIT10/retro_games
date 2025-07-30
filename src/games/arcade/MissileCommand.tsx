@@ -182,7 +182,7 @@ const MissileCommand: React.FC<MissileCommandProps> = ({ onScoreUpdate }) => {
 
     // Missile vs explosion collisions
     setMissiles(prevMissiles => {
-      let newMissiles = [...prevMissiles];
+      const newMissiles = [...prevMissiles];
       let pointsEarned = 0;
 
       explosions.forEach(explosion => {

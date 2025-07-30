@@ -210,8 +210,8 @@ const Bowling: React.FC<BowlingProps> = ({ onScoreUpdate }) => {
     if (!ball.rolling || gameOver || paused) return;
 
     setBall(prev => {
-      let newX = prev.x + prev.vx;
-      let newY = prev.y + prev.vy;
+      const newX = prev.x + prev.vx;
+      const newY = prev.y + prev.vy;
       let newVx = prev.vx;
       let newVy = prev.vy;
 

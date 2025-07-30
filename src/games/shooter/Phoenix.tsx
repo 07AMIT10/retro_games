@@ -180,11 +180,11 @@ const PhoenixGame: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
       return prev.map(phoenix => {
         if (!phoenix.active) return phoenix;
 
-        let newX = phoenix.x + phoenix.vx;
+        const newX = phoenix.x + phoenix.vx;
         let newY = phoenix.y + phoenix.vy;
         let newVx = phoenix.vx;
         let newVy = phoenix.vy;
-        let newAngle = phoenix.angle + 0.1;
+        const newAngle = phoenix.angle + 0.1;
         let newHatchTimer = phoenix.hatchTimer;
 
         if (phoenix.type === 'bird') {
@@ -281,10 +281,10 @@ const PhoenixGame: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
 
     // Player bullets vs phoenixes
     setBullets(prevBullets => {
-      let newBullets = [...prevBullets];
+      const newBullets = [...prevBullets];
       
       setPhoenixes(prevPhoenixes => {
-        let newPhoenixes = [...prevPhoenixes];
+        const newPhoenixes = [...prevPhoenixes];
         let pointsEarned = 0;
 
         newBullets.forEach((bullet, bulletIndex) => {

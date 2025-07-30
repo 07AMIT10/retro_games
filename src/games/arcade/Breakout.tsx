@@ -79,9 +79,9 @@ const Breakout: React.FC<BreakoutProps> = ({ onScoreUpdate }) => {
       }
     }
     return newBricks;
-  }, []);
+  }, [brickColors]);
 
-  const launchBall = () => {
+  const launchBall = useCallback(() => {
     if (!ballLaunched) {
       setBallLaunched(true);
       setBall(prev => ({
@@ -90,7 +90,7 @@ const Breakout: React.FC<BreakoutProps> = ({ onScoreUpdate }) => {
         dy: -Math.abs(prev.dy)
       }));
     }
-  };
+  }, [ballLaunched]);
 
   const updatePaddle = useCallback(() => {
     if (gameOver || paused) return;
@@ -179,7 +179,7 @@ const Breakout: React.FC<BreakoutProps> = ({ onScoreUpdate }) => {
     if (gameOver || paused || !ballLaunched) return;
 
     setBricks(prevBricks => {
-      let newBricks = [...prevBricks];
+      const newBricks = [...prevBricks];
       let pointsEarned = 0;
       let ballBounced = false;
 
@@ -243,7 +243,7 @@ const Breakout: React.FC<BreakoutProps> = ({ onScoreUpdate }) => {
 
       return newBricks;
     });
-  }, [ball, gameOver, paused, ballLaunched, level, createBricks, score]);
+  }, [ball, gameOver, paused, ballLaunched, level, createBricks]);
 
   const resetGame = () => {
     setPaddle({ x: CANVAS_WIDTH / 2 - PADDLE_WIDTH / 2, y: CANVAS_HEIGHT - 30 });
@@ -295,7 +295,7 @@ const Breakout: React.FC<BreakoutProps> = ({ onScoreUpdate }) => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [ballLaunched, paused]);
+  }, [ballLaunched, paused, launchBall]);
 
   useEffect(() => {
     const gameInterval = setInterval(() => {

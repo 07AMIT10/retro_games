@@ -205,7 +205,7 @@ const AirHockey: React.FC<AirHockeyProps> = ({ onScoreUpdate }) => {
 
     // Update puck with enhanced physics
     setPuck(prevPuck => {
-      let newX = prevPuck.x + prevPuck.dx;
+      const newX = prevPuck.x + prevPuck.dx;
       let newY = prevPuck.y + prevPuck.dy;
       let newDx = prevPuck.dx;
       let newDy = prevPuck.dy;

@@ -210,7 +210,7 @@ const DesertRally: React.FC<DesertRallyProps> = ({ onScoreUpdate }) => {
     if (gameOver || paused) return;
 
     setObstacles(prev => {
-      let newObstacles = prev.map(obstacle => ({
+      const newObstacles = prev.map(obstacle => ({
         ...obstacle,
         y: obstacle.y + speed
       })).filter(obstacle => obstacle.y < CANVAS_HEIGHT + 100);

@@ -200,7 +200,7 @@ const Defender: React.FC<DefenderProps> = ({ onScoreUpdate }) => {
       if (!alien.active) return alien;
 
       let newX = alien.x + alien.vx;
-      let newY = alien.y + alien.vy;
+      const newY = alien.y + alien.vy;
       let newVx = alien.vx;
       let newVy = alien.vy;
       let newShootTimer = alien.shootTimer - 1;
@@ -311,10 +311,10 @@ const Defender: React.FC<DefenderProps> = ({ onScoreUpdate }) => {
 
     // Bullets vs aliens
     setBullets(prevBullets => {
-      let newBullets = [...prevBullets];
+      const newBullets = [...prevBullets];
       
       setAliens(prevAliens => {
-        let newAliens = [...prevAliens];
+        const newAliens = [...prevAliens];
         let pointsEarned = 0;
 
         newBullets.forEach((bullet, bulletIndex) => {

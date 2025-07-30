@@ -140,7 +140,7 @@ const SpeedChase: React.FC<SpeedChaseProps> = ({ onScoreUpdate }) => {
       let newVx = prev.vx;
       let newVy = prev.vy;
       let newNitro = prev.nitro;
-      let newInvulnerable = Math.max(0, prev.invulnerable - 1);
+      const newInvulnerable = Math.max(0, prev.invulnerable - 1);
 
       // Steering with better response
       const steeringForce = 0.5; // Increased steering responsiveness

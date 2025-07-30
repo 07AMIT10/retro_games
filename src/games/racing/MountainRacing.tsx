@@ -154,7 +154,7 @@ const MountainRacing: React.FC<MountainRacingProps> = ({ onScoreUpdate }) => {
       // Dynamic obstacle movement based on player speed and game state
       const obstacleSpeed = speed * (1 + Math.abs(player.vy) * 0.1);
       
-      let newObstacles = prev.map(obstacle => {
+      const newObstacles = prev.map(obstacle => {
         // Add slight horizontal movement based on type for more dynamic obstacles
         let dx = 0;
         if (obstacle.type === 'tree') {

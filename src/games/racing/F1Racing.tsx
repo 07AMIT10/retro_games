@@ -292,9 +292,9 @@ const F1Racing: React.FC<F1RacingProps> = ({ onScoreUpdate }) => {
       const lapInfo = getCurrentLapInfo(newX, newY, prev.angle, prev.lapProgress);
       setLastLapProgress(lapInfo.progress);
       
-      let newLap = prev.lap + lapInfo.lap;
+      const newLap = prev.lap + lapInfo.lap;
       let newLapTime = prev.lapTime + 1/60;
-      let newTotalTime = prev.totalTime + 1/60;
+      const newTotalTime = prev.totalTime + 1/60;
 
       if (lapInfo.lap > 0 && raceStarted) {
         // Reset lap timer on new lap

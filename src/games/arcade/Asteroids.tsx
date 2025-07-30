@@ -100,7 +100,7 @@ const Asteroids: React.FC<AsteroidsProps> = ({ onScoreUpdate }) => {
 
     setShip(prev => {
       let newAngle = prev.angle;
-      let newVelocity = { ...prev.velocity };
+      const newVelocity = { ...prev.velocity };
       let thrust = false;
 
       if (keys.has('ArrowLeft')) {
@@ -188,10 +188,10 @@ const Asteroids: React.FC<AsteroidsProps> = ({ onScoreUpdate }) => {
 
     // Bullet vs Asteroid
     setBullets(prevBullets => {
-      let newBullets = [...prevBullets];
+      const newBullets = [...prevBullets];
       
       setAsteroids(prevAsteroids => {
-        let newAsteroids = [...prevAsteroids];
+        const newAsteroids = [...prevAsteroids];
         let pointsEarned = 0;
 
         newBullets.forEach((bullet, bulletIndex) => {
