@@ -9,6 +9,7 @@ const GRID_SIZE = 9;
 const BOX_SIZE = 3;
 
 type SudokuGrid = number[][];
+type SudokuNotes = number[][][];
 
 const Sudoku: React.FC<SudokuProps> = ({ onScoreUpdate }) => {
   const [grid, setGrid] = useState<SudokuGrid>(() => 
@@ -17,6 +18,9 @@ const Sudoku: React.FC<SudokuProps> = ({ onScoreUpdate }) => {
   const [initialGrid, setInitialGrid] = useState<SudokuGrid>(() => 
     Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(0))
   );
+  const [notes, setNotes] = useState<SudokuNotes>(() =>
+    Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null).map(() => []))
+  );
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: number } | null>(null);
   const [mistakes, setMistakes] = useState(0);
   const [score, setScore] = useState(0);
@@ -24,6 +28,9 @@ const Sudoku: React.FC<SudokuProps> = ({ onScoreUpdate }) => {
   const [gameWon, setGameWon] = useState(false);
   const [paused, setPaused] = useState(false);
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
+  const [isNoteMode, setIsNoteMode] = useState(false);
+  const [history, setHistory] = useState<{ grid: SudokuGrid; notes: SudokuNotes }[]>([]);
+  const [conflicts, setConflicts] = useState<{row: number, col: number}[]>([]);
 
   const generateSudoku = useCallback(() => {
     // Create a complete valid Sudoku grid
@@ -67,7 +74,44 @@ const Sudoku: React.FC<SudokuProps> = ({ onScoreUpdate }) => {
 
     setInitialGrid(puzzleGrid.map(row => [...row]));
     setGrid(puzzleGrid);
+    setNotes(Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null).map(() => [])));
+    setHistory([]);
+    setConflicts([]);
   }, [difficulty]);
+
+  const checkConflicts = (grid: SudokuGrid, row: number, col: number, num: number): {row: number, col: number}[] => {
+    const foundConflicts: {row: number, col: number}[] = [];
+    if (num === 0) return foundConflicts;
+
+    // Check row
+    for (let x = 0; x < GRID_SIZE; x++) {
+      if (x !== col && grid[row][x] === num) {
+        foundConflicts.push({row, col: x});
+      }
+    }
+
+    // Check column
+    for (let x = 0; x < GRID_SIZE; x++) {
+      if (x !== row && grid[x][col] === num) {
+        foundConflicts.push({row: x, col});
+      }
+    }
+
+    // Check 3x3 box
+    const boxRowStart = Math.floor(row / BOX_SIZE) * BOX_SIZE;
+    const boxColStart = Math.floor(col / BOX_SIZE) * BOX_SIZE;
+    
+    for (let i = 0; i < BOX_SIZE; i++) {
+      for (let j = 0; j < BOX_SIZE; j++) {
+        const curRow = boxRowStart + i;
+        const curCol = boxColStart + j;
+        if ((curRow !== row || curCol !== col) && grid[curRow][curCol] === num) {
+          foundConflicts.push({row: curRow, col: curCol});
+        }
+      }
+    }
+    return foundConflicts;
+  };
 
   const isValidMove = (grid: SudokuGrid, row: number, col: number, num: number): boolean => {
     // Check row
@@ -105,38 +149,63 @@ const Sudoku: React.FC<SudokuProps> = ({ onScoreUpdate }) => {
     if (initialGrid[row][col] !== 0) return;
 
     const newGrid = grid.map(r => [...r]);
+    const newNotes = notes.map(r => r.map(c => [...c]));
     
-    if (num === 0) {
-      newGrid[row][col] = 0;
-    } else if (isValidMove(newGrid, row, col, num)) {
-      newGrid[row][col] = num;
-      setScore(prev => prev + 10);
-    } else {
+    setHistory(prev => [...prev, { grid, notes }]);
+
+    if (isNoteMode) {
+      const noteIndex = newNotes[row][col].indexOf(num);
+      if (noteIndex > -1) {
+        newNotes[row][col].splice(noteIndex, 1);
+      } else {
+        newNotes[row][col].push(num);
+        newNotes[row][col].sort();
+      }
+      setGrid(newGrid); // Keep grid the same
+      setNotes(newNotes);
+      return;
+    }
+
+    // Not in note mode, placing a number
+    newGrid[row][col] = num;
+    newNotes[row][col] = []; // Clear notes from cell
+    
+    const currentConflicts = checkConflicts(newGrid, row, col, num);
+    if (currentConflicts.length > 0) {
       setMistakes(prev => prev + 1);
       setScore(prev => Math.max(0, prev - 5));
+      setConflicts([...currentConflicts, {row, col}]);
+    } else {
+      setScore(prev => prev + 10);
+      setConflicts([]);
     }
 
     setGrid(newGrid);
+    setNotes(newNotes);
 
     // Check if puzzle is solved
-    const isSolved = newGrid.every(row => 
-      row.every(cell => cell !== 0)
-    ) && newGrid.every((row, rowIndex) =>
-      row.every((cell, colIndex) =>
-        isValidMove(newGrid.map((r, ri) => 
-          r.map((c, ci) => ri === rowIndex && ci === colIndex ? 0 : c)
-        ), rowIndex, colIndex, cell)
-      )
-    );
+    const isComplete = newGrid.every(r => r.every(cell => cell !== 0));
+    if (isComplete) {
+      let isSolved = true;
+      for(let r = 0; r < GRID_SIZE; r++) {
+        for(let c = 0; c < GRID_SIZE; c++) {
+          if(checkConflicts(newGrid, r, c, newGrid[r][c]).length > 0) {
+            isSolved = false;
+            break;
+          }
+        }
+        if(!isSolved) break;
+      }
 
-    if (isSolved) {
-      setGameWon(true);
-      const timeBonus = Math.max(0, 1000 - timeElapsed);
-      const mistakesPenalty = mistakes * 50;
-      const finalScore = score + timeBonus - mistakesPenalty;
-      setScore(finalScore);
-      if (onScoreUpdate) {
-        onScoreUpdate(finalScore);
+      if (isSolved) {
+        setGameWon(true);
+        const timeBonus = Math.max(0, 1000 - timeElapsed);
+        const mistakesPenalty = mistakes * 50;
+        const finalScore = score + timeBonus - mistakesPenalty;
+        setScore(finalScore);
+        if (onScoreUpdate) {
+          onScoreUpdate(finalScore);
+        }
       }
     }
   };
@@ -157,6 +226,15 @@ const Sudoku: React.FC<SudokuProps> = ({ onScoreUpdate }) => {
     }
   };
 
+  const handleUndo = () => {
+    if (history.length === 0 || paused || gameWon) return;
+    const lastState = history[history.length - 1];
+    setGrid(lastState.grid);
+    setNotes(lastState.notes);
+    setHistory(history.slice(0, -1));
+    setConflicts([]);
+  };
+
   useEffect(() => {
     generateSudoku();
   }, [generateSudoku]);
@@ -174,6 +252,20 @@ const Sudoku: React.FC<SudokuProps> = ({ onScoreUpdate }) => {
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       if (gameWon || paused) return;
+
+      if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault();
+        setIsNoteMode(prev => !prev);
+        return;
+      }
+
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'z') {
+          e.preventDefault();
+          handleUndo();
+        }
+        return;
+      }
 
       const num = parseInt(e.key);
       if (num >= 1 && num <= 9) {
@@ -206,12 +298,16 @@ const Sudoku: React.FC<SudokuProps> = ({ onScoreUpdate }) => {
     const isInSameBox = selectedCell && 
       Math.floor(selectedCell.row / BOX_SIZE) === Math.floor(row / BOX_SIZE) &&
       Math.floor(selectedCell.col / BOX_SIZE) === Math.floor(col / BOX_SIZE);
+    const isConflict = conflicts.some(c => c.row === row && c.col === col);
+    const isSameNumber = selectedCell && grid[selectedCell.row][selectedCell.col] !== 0 && grid[row][col] === grid[selectedCell.row][selectedCell.col];
 
     return `
-      flex items-center justify-center text-lg font-bold cursor-pointer transition-all duration-200
+      flex items-center justify-center text-lg font-bold cursor-pointer transition-all duration-200 relative
       ${isInitial ? 'bg-gray-700 text-cyan-400' : 'bg-gray-800 text-white hover:bg-gray-600'}
-      ${isSelected ? 'bg-cyan-400 text-black' : ''}
       ${(isInSameRow || isInSameCol || isInSameBox) && !isSelected ? 'bg-gray-650' : ''}
+      ${isSameNumber && !isSelected ? 'bg-blue-800' : ''}
+      ${isSelected ? 'bg-cyan-400 text-black' : ''}
+      ${isConflict ? 'bg-red-800 !text-red-400' : ''}
       ${row % BOX_SIZE === BOX_SIZE - 1 ? 'border-b-2 border-cyan-400' : 'border-b border-gray-600'}
       ${col % BOX_SIZE === BOX_SIZE - 1 ? 'border-r-2 border-cyan-400' : 'border-r border-gray-600'}
       ${row === 0 ? 'border-t-2 border-cyan-400' : ''}
@@ -267,35 +363,65 @@ const Sudoku: React.FC<SudokuProps> = ({ onScoreUpdate }) => {
                 style={{ width: '48px', height: '48px' }}
                 onClick={() => handleCellClick(rowIndex, colIndex)}
               >
-                {cell > 0 && cell}
+                {cell > 0 ? (
+                  cell
+                ) : (
+                  <div className="grid grid-cols-3 grid-rows-3 w-full h-full text-xs text-gray-400">
+                    {notes[rowIndex][colIndex].map(note => (
+                      <div key={note} className={`flex items-center justify-center`}>
+                        {note}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))
           )}
         </div>
 
-        {/* Number Input */}
-        <div className="mt-4 flex justify-center space-x-2">
-          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+        {/* Number Input & Controls */}
+        <div className="mt-4 flex justify-between items-center">
+          <div className="flex space-x-2">
             <button
-              key={num}
-              onClick={() => handleNumberInput(num)}
-              className="w-10 h-10 bg-gray-700 hover:bg-gray-600 text-cyan-400 border border-cyan-400 rounded font-bold retro-font transition-colors duration-200"
+              onClick={handleUndo}
+              className="px-4 h-10 bg-yellow-600 hover:bg-yellow-700 text-white border border-cyan-400 rounded font-bold retro-font text-sm transition-colors duration-200"
+              disabled={history.length === 0 || gameWon || paused}
+            >
+              Undo
+            </button>
+            <button
+              onClick={() => setIsNoteMode(!isNoteMode)}
+              className={`px-4 h-10 border border-cyan-400 rounded font-bold retro-font text-sm transition-colors duration-200 ${
+                isNoteMode ? 'bg-cyan-400 text-black' : 'bg-gray-700 text-cyan-400 hover:bg-gray-600'
+              }`}
               disabled={gameWon || paused}
             >
-              {num}
+              Notes
             </button>
-          ))}
-          <button
-            onClick={clearCell}
-            className="w-16 h-10 bg-red-600 hover:bg-red-700 text-white border border-cyan-400 rounded font-bold retro-font text-sm transition-colors duration-200"
-            disabled={gameWon || paused}
-          >
-            Clear
-          </button>
+            <button
+              onClick={clearCell}
+              className="px-4 h-10 bg-red-600 hover:bg-red-700 text-white border border-cyan-400 rounded font-bold retro-font text-sm transition-colors duration-200"
+              disabled={gameWon || paused || !selectedCell}
+            >
+              Clear
+            </button>
+          </div>
+          <div className="flex space-x-2">
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+              <button
+                key={num}
+                onClick={() => handleNumberInput(num)}
+                className="w-10 h-10 bg-gray-700 hover:bg-gray-600 text-cyan-400 border border-cyan-400 rounded font-bold retro-font transition-colors duration-200"
+                disabled={gameWon || paused}
+              >
+                {num}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="mt-4 text-center text-sm text-cyan-400 retro-font">
-          <p>Click cell, then number to fill. Use keyboard 1-9 or Delete to clear.</p>
+          <p>Click cell, then number to fill. Use (N) for notes, (Ctrl+Z) to undo.</p>
         </div>
 
         {gameWon && (
