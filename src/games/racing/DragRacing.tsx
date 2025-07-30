@@ -85,7 +85,9 @@ const DragRacing: React.FC<DragRacingProps> = ({ onScoreUpdate }) => {
         newGear = prev.gear - 1;
       }
       
-      return { ...prev, gear: newGear, rpm: prev.rpm * 0.7 };
+      // Fixed RPM drop when shifting for more realistic feel
+      const rpmDrop = direction === 'up' ? 0.7 : 1.2;
+      return { ...prev, gear: newGear, rpm: prev.rpm * rpmDrop };
     });
   }, [raceStarted, gameOver, paused]);
 
@@ -96,35 +98,67 @@ const DragRacing: React.FC<DragRacingProps> = ({ onScoreUpdate }) => {
       let newRPM = prev.rpm;
       let newSpeed = prev.speed;
 
-      // Acceleration based on throttle
+      // Enhanced acceleration with more responsive feel
       if (keys.has(' ')) {
-        newRPM = Math.min(redlineRPM + 500, prev.rpm + 100);
+        // Progressive RPM increase that depends on current gear and RPM
+        const rpmIncrease = 100 * (1 + (maxGear - prev.gear) * 0.2);
+        newRPM = Math.min(redlineRPM + 500, prev.rpm + rpmIncrease);
         
-        // Perfect shift zone
+        // Improved perfect shift zone with more nuanced efficiency curve
         const optimalRPM = redlineRPM * 0.9;
-        const efficiency = newRPM > redlineRPM ? 0.3 : 
-                          Math.abs(newRPM - optimalRPM) < 500 ? 1.0 : 0.7;
         
+        // Better efficiency curve with smoother transitions
+        let efficiency;
+        if (newRPM > redlineRPM) {
+          // Power loss when redlining
+          efficiency = 0.4 - Math.min(0.3, (newRPM - redlineRPM) / 2000);
+        } else if (Math.abs(newRPM - optimalRPM) < 300) {
+          // Perfect shift zone with bonus
+          efficiency = 1.2;
+        } else if (newRPM > optimalRPM - 1000 && newRPM < optimalRPM + 700) {
+          // Good shift zone
+          efficiency = 1.0;
+        } else {
+          // Sub-optimal zone with progressive falloff
+          efficiency = 0.7 - Math.min(0.3, Math.abs(newRPM - optimalRPM) / 5000);
+        }
+        
+        // Perfect start bonus that gradually fades
+        if (perfectStart && raceTime < 5) {
+          efficiency *= 1.3 - (raceTime / 5 * 0.3);
+        }
+        
+        // More realistic acceleration physics
         const acceleration = (newRPM / redlineRPM) * gearRatios[prev.gear] * efficiency;
-        newSpeed = Math.min(200, prev.speed + acceleration * 0.1);
+        
+        // Speed increase with improved physics (faster initial acceleration)
+        const speedGain = acceleration * 0.12 * (1 - Math.min(0.6, prev.speed / 200));
+        newSpeed = Math.min(210, prev.speed + speedGain);
       } else {
-        // No throttle - engine braking
-        newRPM = Math.max(1000, prev.rpm - 50);
-        newSpeed = Math.max(0, prev.speed - 0.1);
+        // More realistic engine braking
+        newRPM = Math.max(800, prev.rpm - (80 + prev.rpm * 0.01));
+        // Gradual deceleration
+        newSpeed = Math.max(0, prev.speed - (0.1 + prev.speed * 0.005));
       }
 
-      // Engine damage if over redline too long
+      // Engine damage if over redline too long with progressive effects
       if (newRPM > redlineRPM) {
-        newSpeed *= 0.95; // Power loss
+        const overRevDamage = 0.95 + (0.04 * (1 - Math.min(1, (newRPM - redlineRPM) / 500)));
+        newSpeed *= overRevDamage; // More nuanced power loss
       }
 
-      const newX = prev.x + newSpeed * 0.1;
+      // More accurate position calculation with speed
+      const newX = prev.x + newSpeed * 0.12;
       
       // Check finish
       if (newX >= FINISH_LINE && !prev.finished) {
         const finishTime = raceTime;
         if (onScoreUpdate) {
-          const score = Math.max(0, 1000 - Math.floor(finishTime * 10));
+          // Improved scoring with reaction time bonus
+          const baseScore = Math.max(0, 1000 - Math.floor(finishTime * 9));
+          const reactionBonus = reactionTime ? Math.max(0, 200 - reactionTime) : 0;
+          const perfectStartBonus = perfectStart ? 300 : 0;
+          const score = baseScore + reactionBonus + perfectStartBonus;
           onScoreUpdate(score);
         }
         return { ...prev, x: FINISH_LINE, finished: true, finishTime };
@@ -132,25 +166,46 @@ const DragRacing: React.FC<DragRacingProps> = ({ onScoreUpdate }) => {
 
       return { ...prev, x: newX, speed: newSpeed, rpm: newRPM };
     });
-  }, [raceStarted, gameOver, paused, player.finished, keys, raceTime, onScoreUpdate]);
+  }, [raceStarted, gameOver, paused, player.finished, keys, raceTime, onScoreUpdate, perfectStart, reactionTime]);
 
   const updateOpponent = useCallback(() => {
     if (!raceStarted || gameOver || paused || opponent.finished) return;
 
     setOpponent(prev => {
-      // AI opponent logic
-      let newRPM = prev.rpm + 80 + Math.random() * 40;
+      // Enhanced AI opponent logic with more realistic behavior
+      // AI should make occasional mistakes but be challenging
+      let newRPM = prev.rpm + (70 + Math.random() * 50);
       let newGear = prev.gear;
       
-      // AI gear shifting
-      if (newRPM > redlineRPM * 0.85 && prev.gear < maxGear) {
+      // Improved AI gear shifting logic with occasional suboptimal shifts
+      const shouldShift = Math.random() > 0.05; // 5% chance AI misses shift point
+      if (newRPM > redlineRPM * (shouldShift ? 0.85 : 0.95) && prev.gear < maxGear) {
         newGear = prev.gear + 1;
-        newRPM *= 0.7;
+        // Realistic RPM drop when shifting
+        newRPM *= 0.65 + Math.random() * 0.1;
       }
       
-      const acceleration = (newRPM / redlineRPM) * gearRatios[newGear] * 0.9;
-      const newSpeed = Math.min(180, prev.speed + acceleration * 0.1);
-      const newX = prev.x + newSpeed * 0.1;
+      // More dynamic AI difficulty that adjusts based on player position
+      const playerAhead = player.x > prev.x;
+      const distanceGap = Math.abs(player.x - prev.x);
+      
+      // AI adapts based on player performance - rubber band effect
+      let aiSkillFactor;
+      if (playerAhead) {
+        // AI tries harder when behind (stronger rubber-banding)
+        aiSkillFactor = 0.9 + Math.min(0.2, distanceGap / 1000);
+      } else {
+        // AI is slightly slower when ahead to keep race interesting
+        aiSkillFactor = 0.92 - Math.min(0.1, distanceGap / 2000);
+      }
+      
+      // Better acceleration model for AI
+      const acceleration = (newRPM / redlineRPM) * gearRatios[newGear] * aiSkillFactor;
+      const speedGain = acceleration * 0.11 * (1 - Math.min(0.5, prev.speed / 200));
+      const newSpeed = Math.min(190, prev.speed + speedGain);
+      
+      // More realistic position calculation
+      const newX = prev.x + newSpeed * 0.12;
       
       // Check finish
       if (newX >= FINISH_LINE && !prev.finished) {
@@ -159,7 +214,7 @@ const DragRacing: React.FC<DragRacingProps> = ({ onScoreUpdate }) => {
 
       return { ...prev, x: newX, speed: newSpeed, rpm: newRPM, gear: newGear };
     });
-  }, [raceStarted, gameOver, paused, opponent.finished, raceTime]);
+  }, [raceStarted, gameOver, paused, opponent.finished, raceTime, player.x]);
 
   const resetGame = () => {
     setPlayer({
@@ -245,14 +300,77 @@ const DragRacing: React.FC<DragRacingProps> = ({ onScoreUpdate }) => {
     };
   }, [shiftGear]);
 
+  // Prevent keys from getting "stuck" when window loses focus
   useEffect(() => {
-    const gameInterval = setInterval(() => {
-      updatePlayer();
-      updateOpponent();
-    }, 16);
+    const handleBlur = () => {
+      setKeys(new Set());
+    };
+    
+    window.addEventListener('blur', handleBlur);
+    
+    return () => {
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, []);
 
-    return () => clearInterval(gameInterval);
+  // Improved game loop using requestAnimationFrame
+  useEffect(() => {
+    let frameId: number;
+    let lastTime = 0;
+    const FPS = 60;
+    const frameTime = 1000 / FPS;
+    let deltaTime = 0;
+    
+    const gameLoop = (timestamp: number) => {
+      if (!lastTime) lastTime = timestamp;
+      deltaTime += timestamp - lastTime;
+      lastTime = timestamp;
+      
+      // Update with fixed time step for consistent physics
+      while (deltaTime >= frameTime) {
+        updatePlayer();
+        updateOpponent();
+        deltaTime -= frameTime;
+      }
+      
+      frameId = requestAnimationFrame(gameLoop);
+    };
+    
+    frameId = requestAnimationFrame(gameLoop);
+    
+    return () => cancelAnimationFrame(frameId);
   }, [updatePlayer, updateOpponent]);
+
+  // Better time measurement for race using requestAnimationFrame
+  useEffect(() => {
+    let frameId: number;
+    let lastTime: number | null = null;
+    
+    const updateTime = (timestamp: number) => {
+      if (!raceStarted || gameOver || paused) {
+        lastTime = null;
+        return;
+      }
+      
+      if (lastTime === null) {
+        lastTime = timestamp;
+      }
+      
+      const delta = timestamp - lastTime;
+      setRaceTime(prev => prev + delta / 1000);
+      lastTime = timestamp;
+      
+      frameId = requestAnimationFrame(updateTime);
+    };
+    
+    if (raceStarted && !gameOver && !paused) {
+      frameId = requestAnimationFrame(updateTime);
+    }
+    
+    return () => {
+      if (frameId) cancelAnimationFrame(frameId);
+    };
+  }, [raceStarted, gameOver, paused]);
 
   const formatTime = (seconds: number): string => {
     return seconds.toFixed(3) + 's';

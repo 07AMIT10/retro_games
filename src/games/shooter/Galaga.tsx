@@ -29,6 +29,11 @@ interface Enemy extends Position {
   formation: boolean;
   angle: number;
   speed: number;
+  health: number;
+  points: number;
+  homeX: number;
+  homeY: number;
+  attackTimer: number;
 }
 
 const Galaga: React.FC<GalagaProps> = ({ onScoreUpdate }) => {
@@ -46,28 +51,56 @@ const Galaga: React.FC<GalagaProps> = ({ onScoreUpdate }) => {
   const [paused, setPaused] = useState(false);
   const [keys, setKeys] = useState<Set<string>>(new Set());
   const [waveComplete, setWaveComplete] = useState(false);
+  const [formationTime, setFormationTime] = useState(0);
 
   const createEnemies = useCallback(() => {
     const newEnemies: Enemy[] = [];
+    const rows = Math.min(4 + Math.floor(level / 2), 6);
+    const cols = Math.min(8 + Math.floor(level / 3), 10);
     
     // Create formation
-    for (let row = 0; row < 5; row++) {
-      for (let col = 0; col < 8; col++) {
-        const enemyType: Enemy['type'] = row === 0 ? 'boss' : row <= 2 ? 'butterfly' : 'bee';
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        let enemyType: Enemy['type'];
+        let health: number;
+        let points: number;
+        
+        if (row === 0 && col % 2 === 0) {
+          enemyType = 'boss';
+          health = 2 + Math.floor(level / 5);
+          points = 150;
+        } else if (row <= 1) {
+          enemyType = 'butterfly';
+          health = 1 + Math.floor(level / 8);
+          points = 80;
+        } else {
+          enemyType = 'bee';
+          health = 1;
+          points = 50;
+        }
+        
+        const homeX = 100 + col * 50;
+        const homeY = 100 + row * 40;
+        
         newEnemies.push({
-          x: 100 + col * 50,
-          y: 100 + row * 40,
+          x: homeX,
+          y: homeY,
+          homeX,
+          homeY,
           type: enemyType,
           active: true,
           formation: true,
           angle: 0,
-          speed: 1
+          speed: 1 + level * 0.1,
+          health,
+          points,
+          attackTimer: Math.random() * 300 + 200
         });
       }
     }
     
     return newEnemies;
-  }, []);
+  }, [level]);
 
   const shoot = useCallback(() => {
     if (gameOver || paused || bullets.length >= 3) return;
@@ -78,7 +111,7 @@ const Galaga: React.FC<GalagaProps> = ({ onScoreUpdate }) => {
         x: player.x + PLAYER_WIDTH / 2,
         y: player.y,
         active: true,
-        speed: 8
+        speed: 10
       }
     ]);
   }, [player, bullets.length, gameOver, paused]);
@@ -90,10 +123,10 @@ const Galaga: React.FC<GalagaProps> = ({ onScoreUpdate }) => {
       let newX = prev.x;
       
       if (keys.has('ArrowLeft') || keys.has('a') || keys.has('A')) {
-        newX = Math.max(0, prev.x - 5);
+        newX = Math.max(0, prev.x - 6);
       }
       if (keys.has('ArrowRight') || keys.has('d') || keys.has('D')) {
-        newX = Math.min(CANVAS_WIDTH - PLAYER_WIDTH, prev.x + 5);
+        newX = Math.min(CANVAS_WIDTH - PLAYER_WIDTH, prev.x + 6);
       }
       
       return { ...prev, x: newX };
@@ -123,6 +156,8 @@ const Galaga: React.FC<GalagaProps> = ({ onScoreUpdate }) => {
   const updateEnemies = useCallback(() => {
     if (gameOver || paused) return;
 
+    setFormationTime(prev => prev + 1);
+
     setEnemies(prev => {
       const activeEnemies = prev.filter(enemy => enemy.active);
       
@@ -131,6 +166,7 @@ const Galaga: React.FC<GalagaProps> = ({ onScoreUpdate }) => {
         setTimeout(() => {
           setLevel(prevLevel => prevLevel + 1);
           setWaveComplete(false);
+          setFormationTime(0);
         }, 2000);
         return createEnemies();
       }
@@ -138,58 +174,94 @@ const Galaga: React.FC<GalagaProps> = ({ onScoreUpdate }) => {
       return prev.map(enemy => {
         if (!enemy.active) return enemy;
 
+        let newX = enemy.x;
+        let newY = enemy.y;
+        let newFormation = enemy.formation;
+        let newAngle = enemy.angle;
+        let newAttackTimer = enemy.attackTimer - 1;
+
         if (enemy.formation) {
-          // Formation flying pattern
-          const time = Date.now() / 1000;
-          return {
-            ...enemy,
-            x: enemy.x + Math.sin(time + enemy.x * 0.01) * 0.5,
-            y: enemy.y + Math.sin(time * 0.5) * 0.2
-          };
+          // Formation flying pattern with gentle movement
+          const time = formationTime / 100;
+          const waveAmplitude = enemy.type === 'boss' ? 15 : 10;
+          newX = enemy.homeX + Math.sin(time + enemy.homeX * 0.01) * waveAmplitude;
+          newY = enemy.homeY + Math.sin(time * 0.3) * 5;
+          
+          // Decide to attack
+          if (newAttackTimer <= 0 && Math.random() < 0.003) {
+            newFormation = false;
+            newAngle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
+            newAttackTimer = 0;
+          }
         } else {
-          // Attack pattern
-          return {
-            ...enemy,
-            x: enemy.x + Math.cos(enemy.angle) * enemy.speed,
-            y: enemy.y + Math.sin(enemy.angle) * enemy.speed,
-            angle: enemy.angle + 0.1
-          };
+          // Attack pattern - dive toward player then return to formation
+          if (newAttackTimer < 120) {
+            // Diving attack
+            const targetX = player.x + PLAYER_WIDTH / 2;
+            const targetY = player.y;
+            const dx = targetX - enemy.x;
+            const dy = targetY - enemy.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance > 20) {
+              newX += (dx / distance) * (enemy.speed + 2);
+              newY += (dy / distance) * (enemy.speed + 2);
+            }
+            
+            newAttackTimer++;
+          } else {
+            // Return to formation
+            const dx = enemy.homeX - enemy.x;
+            const dy = enemy.homeY - enemy.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance > 10) {
+              newX += (dx / distance) * enemy.speed * 1.5;
+              newY += (dy / distance) * enemy.speed * 1.5;
+            } else {
+              newFormation = true;
+              newAttackTimer = Math.random() * 400 + 300;
+            }
+          }
         }
+
+        return {
+          ...enemy,
+          x: newX,
+          y: newY,
+          formation: newFormation,
+          angle: newAngle,
+          attackTimer: newAttackTimer
+        };
       });
     });
 
-    // Random enemy shooting
-    if (Math.random() < 0.005) {
+    // Enhanced enemy shooting
+    const shootChance = 0.008 + level * 0.002;
+    if (Math.random() < shootChance) {
       const activeEnemies = enemies.filter(enemy => enemy.active);
       if (activeEnemies.length > 0) {
-        const shooter = activeEnemies[Math.floor(Math.random() * activeEnemies.length)];
-        setEnemyBullets(prev => [
-          ...prev,
-          {
-            x: shooter.x + ENEMY_WIDTH / 2,
-            y: shooter.y + ENEMY_HEIGHT,
-            active: true,
-            speed: 3
-          }
-        ]);
+        const shooters = activeEnemies.filter(enemy => 
+          !enemy.formation || Math.random() < 0.3
+        );
+        
+        if (shooters.length > 0) {
+          const shooter = shooters[Math.floor(Math.random() * shooters.length)];
+          const bulletSpeed = shooter.type === 'boss' ? 4 : 3;
+          
+          setEnemyBullets(prev => [
+            ...prev,
+            {
+              x: shooter.x + ENEMY_WIDTH / 2,
+              y: shooter.y + ENEMY_HEIGHT,
+              active: true,
+              speed: bulletSpeed
+            }
+          ]);
+        }
       }
     }
-
-    // Random enemy attack (dive bombing)
-    if (Math.random() < 0.001) {
-      setEnemies(prev => prev.map(enemy => {
-        if (enemy.active && enemy.formation && Math.random() < 0.1) {
-          return {
-            ...enemy,
-            formation: false,
-            angle: Math.atan2(player.y - enemy.y, player.x - enemy.x),
-            speed: 2
-          };
-        }
-        return enemy;
-      }));
-    }
-  }, [enemies, gameOver, paused, createEnemies, player, level]);
+  }, [enemies, gameOver, paused, createEnemies, player, level, formationTime]);
 
   const checkCollisions = useCallback(() => {
     if (gameOver || paused) return;
@@ -215,11 +287,17 @@ const Galaga: React.FC<GalagaProps> = ({ onScoreUpdate }) => {
               bullet.y <= enemy.y + ENEMY_HEIGHT
             ) {
               newBullets[bulletIndex] = { ...bullet, active: false };
-              newEnemies[enemyIndex] = { ...enemy, active: false };
+              newEnemies[enemyIndex] = { 
+                ...enemy, 
+                health: enemy.health - 1 
+              };
               
-              const points = enemy.type === 'boss' ? 150 : 
-                           enemy.type === 'butterfly' ? 80 : 50;
-              pointsEarned += points * level;
+              if (newEnemies[enemyIndex].health <= 0) {
+                newEnemies[enemyIndex].active = false;
+                let points = enemy.points * level;
+                if (!enemy.formation) points *= 2; // Bonus for hitting attacking enemy
+                pointsEarned += points;
+              }
             }
           });
         });
@@ -281,7 +359,7 @@ const Galaga: React.FC<GalagaProps> = ({ onScoreUpdate }) => {
         return newLives;
       });
     }
-  }, [enemies, player, gameOver, paused, score, level, onScoreUpdate]);
+  }, [enemies, player, gameOver, paused, score, onScoreUpdate]);
 
   const resetGame = () => {
     setPlayer({ x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 50 });
@@ -292,6 +370,7 @@ const Galaga: React.FC<GalagaProps> = ({ onScoreUpdate }) => {
     setLives(3);
     setLevel(1);
     setWaveComplete(false);
+    setFormationTime(0);
     setGameOver(false);
     setPaused(false);
   };
@@ -353,132 +432,5 @@ const Galaga: React.FC<GalagaProps> = ({ onScoreUpdate }) => {
     return () => clearInterval(gameInterval);
   }, [updatePlayer, updateBullets, updateEnemies, checkCollisions]);
 
-  const getEnemyColor = (type: Enemy['type']) => {
-    switch (type) {
-      case 'boss': return 'bg-red-500';
-      case 'butterfly': return 'bg-blue-500';
-      case 'bee': return 'bg-yellow-500';
-    }
-  };
-
-  return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-black p-4">
-      <div className="bg-gray-900 border-2 border-cyan-400 rounded-lg p-6 shadow-2xl retro-glow">
-        <div className="flex items-center justify-between mb-4">
-          <div className="text-cyan-400 retro-font">
-            <div className="text-lg font-bold">GALAGA</div>
-            <div className="text-sm">Score: {score} | Lives: {lives} | Level: {level}</div>
-          </div>
-          <div className="flex space-x-2">
-            <button
-              onClick={() => setPaused(!paused)}
-              className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded border border-cyan-400"
-              disabled={gameOver}
-            >
-              {paused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
-            </button>
-            <button
-              onClick={resetGame}
-              className="bg-green-600 hover:bg-green-700 text-white p-2 rounded border border-cyan-400"
-            >
-              <RotateCcw className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        <div
-          className="relative bg-black border-2 border-gray-600 overflow-hidden"
-          style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
-        >
-          {/* Player */}
-          <div
-            className="absolute bg-green-400"
-            style={{
-              left: player.x,
-              top: player.y,
-              width: PLAYER_WIDTH,
-              height: PLAYER_HEIGHT,
-              clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)'
-            }}
-          />
-
-          {/* Player bullets */}
-          {bullets.map((bullet, index) => (
-            <div
-              key={`bullet-${index}`}
-              className="absolute bg-yellow-400 rounded-full"
-              style={{
-                left: bullet.x - BULLET_SIZE / 2,
-                top: bullet.y - BULLET_SIZE / 2,
-                width: BULLET_SIZE,
-                height: BULLET_SIZE
-              }}
-            />
-          ))}
-
-          {/* Enemy bullets */}
-          {enemyBullets.map((bullet, index) => (
-            <div
-              key={`enemy-bullet-${index}`}
-              className="absolute bg-red-400 rounded-full"
-              style={{
-                left: bullet.x - BULLET_SIZE / 2,
-                top: bullet.y - BULLET_SIZE / 2,
-                width: BULLET_SIZE,
-                height: BULLET_SIZE
-              }}
-            />
-          ))}
-
-          {/* Enemies */}
-          {enemies.filter(enemy => enemy.active).map((enemy, index) => (
-            <div
-              key={`enemy-${index}`}
-              className={`absolute ${getEnemyColor(enemy.type)} rounded`}
-              style={{
-                left: enemy.x,
-                top: enemy.y,
-                width: ENEMY_WIDTH,
-                height: ENEMY_HEIGHT,
-                transform: enemy.formation ? 'none' : `rotate(${enemy.angle}rad)`
-              }}
-            />
-          ))}
-
-          {waveComplete && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
-              <div className="text-green-400 text-3xl font-bold retro-font animate-pulse">
-                STAGE {level} CLEAR!
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="mt-4 text-center text-sm text-cyan-400 retro-font">
-          <p>←→ Move • Space - Shoot • Watch for diving attacks!</p>
-        </div>
-
-        {gameOver && (
-          <div className="mt-4 text-center">
-            <div className="text-red-400 text-2xl font-bold mb-2 retro-font">GAME OVER!</div>
-            <p className="text-cyan-400 mb-4 retro-font">Final Score: {score}</p>
-            <button
-              onClick={resetGame}
-              className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded font-bold border-2 border-cyan-400"
-            >
-              PLAY AGAIN
-            </button>
-          </div>
-        )}
-
-        {paused && !gameOver && (
-          <div className="mt-4 text-center text-yellow-400 text-xl font-bold retro-font">
-            PAUSED
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-export default Galaga;
+  const getEnemyColor = (enemy: Enemy) => {
+    if

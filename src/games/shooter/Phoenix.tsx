@@ -28,9 +28,11 @@ interface Phoenix extends Position {
   type: 'bird' | 'egg' | 'boss';
   health: number;
   angle: number;
+  points: number;
+  hatchTimer?: number;
 }
 
-const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
+const PhoenixGame: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
   const [player, setPlayer] = useState<Position>({ 
     x: CANVAS_WIDTH / 2 - PLAYER_SIZE / 2, 
     y: CANVAS_HEIGHT - 50 
@@ -45,27 +47,31 @@ const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
   const [paused, setPaused] = useState(false);
   const [keys, setKeys] = useState<Set<string>>(new Set());
   const [waveType, setWaveType] = useState<'birds' | 'eggs' | 'boss'>('birds');
+  const [waveComplete, setWaveComplete] = useState(false);
 
   const createWave = useCallback(() => {
     const newPhoenixes: Phoenix[] = [];
     
     if (waveType === 'birds') {
-      // Flying bird formation
-      for (let i = 0; i < 8; i++) {
+      // Flying phoenix birds
+      const birdCount = 8 + Math.floor(level / 2);
+      for (let i = 0; i < birdCount; i++) {
         newPhoenixes.push({
-          x: 50 + i * 60,
-          y: 100,
+          x: Math.random() * (CANVAS_WIDTH - PHOENIX_SIZE),
+          y: 50 + Math.random() * 100,
           active: true,
-          vx: 1 + Math.random(),
-          vy: 0,
+          vx: (Math.random() - 0.5) * 4,
+          vy: 1 + Math.random(),
           type: 'bird',
           health: 1,
-          angle: 0
+          angle: 0,
+          points: 100
         });
       }
     } else if (waveType === 'eggs') {
       // Phoenix eggs that hatch
-      for (let i = 0; i < 6; i++) {
+      const eggCount = 6 + Math.floor(level / 3);
+      for (let i = 0; i < eggCount; i++) {
         newPhoenixes.push({
           x: 100 + i * 80,
           y: 50 + Math.random() * 100,
@@ -74,7 +80,9 @@ const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
           vy: 1,
           type: 'egg',
           health: 2,
-          angle: 0
+          angle: 0,
+          points: 200,
+          hatchTimer: 300 + Math.random() * 200
         });
       }
     } else {
@@ -86,16 +94,17 @@ const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
         vx: 2,
         vy: 0,
         type: 'boss',
-        health: 15,
-        angle: 0
+        health: 15 + level * 3,
+        angle: 0,
+        points: 500
       });
     }
     
     return newPhoenixes;
-  }, [waveType]);
+  }, [waveType, level]);
 
   const shoot = useCallback(() => {
-    if (gameOver || paused || bullets.length >= 5) return;
+    if (gameOver || paused || bullets.length >= 4) return;
     
     setBullets(prev => [
       ...prev,
@@ -103,7 +112,7 @@ const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
         x: player.x + PLAYER_SIZE / 2,
         y: player.y,
         active: true,
-        vy: -8
+        vy: -10
       }
     ]);
   }, [player, bullets.length, gameOver, paused]);
@@ -115,10 +124,10 @@ const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
       let newX = prev.x;
       
       if (keys.has('ArrowLeft')) {
-        newX = Math.max(0, prev.x - 6);
+        newX = Math.max(0, prev.x - 7);
       }
       if (keys.has('ArrowRight')) {
-        newX = Math.min(CANVAS_WIDTH - PLAYER_SIZE, prev.x + 6);
+        newX = Math.min(CANVAS_WIDTH - PLAYER_SIZE, prev.x + 7);
       }
       
       return { ...prev, x: newX };
@@ -152,15 +161,19 @@ const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
       const activePhoenixes = prev.filter(p => p.active);
       
       if (activePhoenixes.length === 0) {
-        // Next wave
-        if (waveType === 'birds') {
-          setWaveType('eggs');
-        } else if (waveType === 'eggs') {
-          setWaveType('boss');
-        } else {
-          setWaveType('birds');
-          setLevel(prevLevel => prevLevel + 1);
-        }
+        setWaveComplete(true);
+        setTimeout(() => {
+          // Next wave
+          if (waveType === 'birds') {
+            setWaveType('eggs');
+          } else if (waveType === 'eggs') {
+            setWaveType('boss');
+          } else {
+            setWaveType('birds');
+            setLevel(prevLevel => prevLevel + 1);
+          }
+          setWaveComplete(false);
+        }, 2000);
         return createWave();
       }
 
@@ -172,9 +185,10 @@ const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
         let newVx = phoenix.vx;
         let newVy = phoenix.vy;
         let newAngle = phoenix.angle + 0.1;
+        let newHatchTimer = phoenix.hatchTimer;
 
         if (phoenix.type === 'bird') {
-          // Flying pattern
+          // Flying pattern with diving attacks
           newY += Math.sin(newAngle) * 2;
           
           if (newX <= 0 || newX >= CANVAS_WIDTH - PHOENIX_SIZE) {
@@ -186,16 +200,24 @@ const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
             newVy = 3;
             newVx = (player.x - phoenix.x) * 0.02;
           }
-        } else if (phoenix.type === 'egg') {
-          // Slow downward movement
+          
+          // Return to normal flight after diving
           if (newY > CANVAS_HEIGHT / 2) {
+            newVy = -1;
+          }
+        } else if (phoenix.type === 'egg') {
+          // Slow downward movement and hatching
+          if (newHatchTimer && newHatchTimer > 0) {
+            newHatchTimer--;
+          } else if (newY > CANVAS_HEIGHT / 2) {
             // Hatch into bird
             return {
               ...phoenix,
               type: 'bird',
               vx: Math.random() > 0.5 ? 2 : -2,
               vy: 0,
-              health: 1
+              health: 1,
+              points: 100
             };
           }
         } else if (phoenix.type === 'boss') {
@@ -206,17 +228,21 @@ const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
             newVx = -newVx;
           }
           
-          // Boss shooting
-          if (Math.random() < 0.02) {
-            setPhoenixBullets(prevBullets => [
-              ...prevBullets,
-              {
-                x: phoenix.x + PHOENIX_SIZE / 2,
-                y: phoenix.y + PHOENIX_SIZE,
-                active: true,
-                vy: 4
-              }
-            ]);
+          // Boss shooting pattern
+          if (Math.random() < 0.03) {
+            const spreadCount = 3;
+            for (let i = 0; i < spreadCount; i++) {
+              const angle = -Math.PI/2 + (i - 1) * 0.3;
+              setPhoenixBullets(prevBullets => [
+                ...prevBullets,
+                {
+                  x: phoenix.x + PHOENIX_SIZE / 2,
+                  y: phoenix.y + PHOENIX_SIZE,
+                  active: true,
+                  vy: 4 * Math.sin(angle) + 3
+                }
+              ]);
+            }
           }
         }
 
@@ -226,7 +252,8 @@ const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
           y: newY,
           vx: newVx,
           vy: newVy,
-          angle: newAngle
+          angle: newAngle,
+          hatchTimer: newHatchTimer
         };
       });
     });
@@ -280,9 +307,7 @@ const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
               
               if (newPhoenixes[phoenixIndex].health <= 0) {
                 newPhoenixes[phoenixIndex].active = false;
-                const points = phoenix.type === 'boss' ? 500 : 
-                             phoenix.type === 'egg' ? 200 : 100;
-                pointsEarned += points;
+                pointsEarned += phoenix.points * level;
               }
             }
           });
@@ -356,6 +381,7 @@ const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
     setLives(3);
     setLevel(1);
     setWaveType('birds');
+    setWaveComplete(false);
     setGameOver(false);
     setPaused(false);
   };
@@ -418,9 +444,11 @@ const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
   }, [updatePlayer, updateBullets, updatePhoenixes, checkCollisions]);
 
   const getPhoenixColor = (phoenix: Phoenix) => {
-    if (phoenix.type === 'boss') return 'bg-red-500';
-    if (phoenix.type === 'egg') return 'bg-yellow-600';
-    return 'bg-orange-500';
+    switch (phoenix.type) {
+      case 'boss': return 'bg-red-500';
+      case 'egg': return 'bg-yellow-500';
+      case 'bird': return 'bg-orange-500';
+    }
   };
 
   return (
@@ -450,18 +478,19 @@ const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
         </div>
 
         <div
-          className="relative bg-gradient-to-b from-purple-900 to-black border-2 border-gray-600 overflow-hidden"
+          className="relative bg-gradient-to-b from-orange-900 to-black border-2 border-gray-600 overflow-hidden"
           style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
         >
           {/* Player */}
           <div
-            className="absolute bg-cyan-400"
+            className="absolute bg-cyan-400 shadow-lg"
             style={{
               left: player.x,
               top: player.y,
               width: PLAYER_SIZE,
               height: PLAYER_SIZE,
-              clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)'
+              clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)',
+              boxShadow: '0 0 10px cyan'
             }}
           />
 
@@ -469,12 +498,13 @@ const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
           {bullets.map((bullet, index) => (
             <div
               key={`bullet-${index}`}
-              className="absolute bg-yellow-400 rounded-full"
+              className="absolute bg-yellow-400 rounded-full shadow-lg"
               style={{
                 left: bullet.x - BULLET_SIZE / 2,
                 top: bullet.y - BULLET_SIZE / 2,
                 width: BULLET_SIZE,
-                height: BULLET_SIZE
+                height: BULLET_SIZE,
+                boxShadow: '0 0 5px yellow'
               }}
             />
           ))}
@@ -483,12 +513,13 @@ const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
           {phoenixBullets.map((bullet, index) => (
             <div
               key={`phoenix-bullet-${index}`}
-              className="absolute bg-red-400 rounded-full"
+              className="absolute bg-red-400 rounded-full shadow-lg"
               style={{
                 left: bullet.x - BULLET_SIZE / 2,
                 top: bullet.y - BULLET_SIZE / 2,
                 width: BULLET_SIZE,
-                height: BULLET_SIZE
+                height: BULLET_SIZE,
+                boxShadow: '0 0 5px red'
               }}
             />
           ))}
@@ -497,32 +528,53 @@ const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
           {phoenixes.filter(phoenix => phoenix.active).map((phoenix, index) => (
             <div
               key={`phoenix-${index}`}
-              className={`absolute ${getPhoenixColor(phoenix)} rounded`}
+              className={`absolute ${getPhoenixColor(phoenix)} border border-white shadow-lg`}
               style={{
                 left: phoenix.x,
                 top: phoenix.y,
                 width: PHOENIX_SIZE,
                 height: PHOENIX_SIZE,
-                transform: `rotate(${phoenix.angle}rad)`,
-                clipPath: phoenix.type === 'egg' ? 'ellipse(50% 60% at 50% 50%)' : 'polygon(50% 0%, 0% 100%, 100% 100%)'
+                transform: `rotate(${phoenix.angle}rad) ${phoenix.type === 'boss' ? 'scale(1.5)' : ''}`,
+                clipPath: phoenix.type === 'egg' ? 'ellipse(50% 60% at 50% 50%)' : 
+                         phoenix.type === 'boss' ? 'polygon(50% 0%, 0% 30%, 20% 100%, 80% 100%, 100% 30%)' :
+                         'polygon(50% 0%, 0% 100%, 100% 100%)',
+                boxShadow: `0 0 ${phoenix.type === 'boss' ? '15px' : '8px'} ${
+                  phoenix.type === 'boss' ? 'red' : phoenix.type === 'egg' ? 'yellow' : 'orange'
+                }`,
+                opacity: phoenix.health > 1 ? 1 : 0.8
               }}
-            />
+            >
+              <div className="w-full h-full flex items-center justify-center text-white text-xs font-bold">
+                {phoenix.type === 'boss' ? '🔥' : phoenix.type === 'egg' ? '🥚' : '🐦'}
+              </div>
+            </div>
           ))}
+
+          {waveComplete && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-70">
+              <div className="text-orange-400 text-2xl font-bold retro-font animate-pulse">
+                {waveType === 'birds' ? 'EGGS INCOMING!' : 
+                 waveType === 'eggs' ? 'BOSS PHOENIX!' : 
+                 'LEVEL COMPLETE!'}
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="mt-4 text-center text-sm text-cyan-400 retro-font">
-          <p>←→ Move • Space - Shoot • Fight through all three waves!</p>
+        <div className="mt-4 text-center text-sm text-cyan-400 retro-font space-y-1">
+          <p><strong>←→</strong> Move • <strong>Space</strong> Shoot • <strong>P</strong> Pause</p>
+          <p>Fight through all three waves! Eggs hatch into birds!</p>
         </div>
 
         {gameOver && (
           <div className="mt-4 text-center">
-            <div className="text-red-400 text-2xl font-bold mb-2 retro-font">GAME OVER!</div>
+            <div className="text-red-400 text-2xl font-bold mb-2 retro-font">PHOENIX RISES!</div>
             <p className="text-cyan-400 mb-4 retro-font">Final Score: {score}</p>
             <button
               onClick={resetGame}
               className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded font-bold border-2 border-cyan-400"
             >
-              PLAY AGAIN
+              RISE AGAIN
             </button>
           </div>
         )}
@@ -537,4 +589,4 @@ const Phoenix: React.FC<PhoenixProps> = ({ onScoreUpdate }) => {
   );
 };
 
-export default Phoenix;
+export default PhoenixGame;

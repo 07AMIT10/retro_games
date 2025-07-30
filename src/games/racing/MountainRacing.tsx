@@ -70,41 +70,70 @@ const MountainRacing: React.FC<MountainRacingProps> = ({ onScoreUpdate }) => {
       let newVy = prev.vy;
       let newAngle = prev.angle;
 
-      // Steering
+      // Enhanced steering physics
       if (keys.has('ArrowLeft')) {
-        newVx = Math.max(-6, prev.vx - 0.3);
-        newAngle -= 0.1;
+        // Steering more responsive at speed, less at low speeds
+        const steerFactor = 0.3 * (1 + Math.abs(prev.vy) * 0.05);
+        newVx = Math.max(-6.5, prev.vx - steerFactor);
+        // Car turns more when steering at speed
+        newAngle -= 0.1 * (1 + Math.abs(prev.vy) * 0.03);
       }
       if (keys.has('ArrowRight')) {
-        newVx = Math.min(6, prev.vx + 0.3);
-        newAngle += 0.1;
+        const steerFactor = 0.3 * (1 + Math.abs(prev.vy) * 0.05);
+        newVx = Math.min(6.5, prev.vx + steerFactor);
+        newAngle += 0.1 * (1 + Math.abs(prev.vy) * 0.03);
       }
 
-      // Acceleration/Braking
+      // Improved acceleration/braking physics
       if (keys.has('ArrowUp')) {
-        newVy = Math.max(-8, prev.vy - 0.4);
+        // Progressive acceleration that gets harder at higher speeds
+        const accelerationFactor = 0.4 * (1 - Math.min(0.7, Math.abs(prev.vy) / 10));
+        newVy = Math.max(-9, prev.vy - accelerationFactor);
       } else if (keys.has('ArrowDown')) {
-        newVy = Math.min(2, prev.vy + 0.6); // Brake/reverse
+        // More responsive braking
+        const brakingFactor = prev.vy < 0 ? 0.8 : 0.4; // Stronger braking when moving forward
+        newVy = Math.min(2.5, prev.vy + brakingFactor);
       } else {
-        newVy = prev.vy * 0.95; // Natural deceleration
+        // Variable natural deceleration based on terrain
+        const decelRate = 0.95 - (altitude / 1000) * 0.05; // Slightly less friction at higher altitudes
+        newVy = prev.vy * decelRate;
       }
 
-      // Apply friction
-      newVx *= 0.9;
+      // Apply variable friction based on terrain and speed
+      // Less friction at higher speeds to simulate momentum
+      const frictionFactor = 0.9 + (Math.abs(prev.speed) * 0.005);
+      newVx *= Math.min(0.97, frictionFactor);
 
+      // More realistic movement calculation
       let newX = prev.x + newVx;
       let newY = prev.y + newVy;
 
-      // Keep on screen horizontally
-      newX = Math.max(CAR_WIDTH / 2, Math.min(CANVAS_WIDTH - CAR_WIDTH / 2, newX));
-
-      // Wrap vertically (continuous mountain road)
-      if (newY < -CAR_HEIGHT) {
-        newY = CANVAS_HEIGHT;
-      } else if (newY > CANVAS_HEIGHT) {
-        newY = -CAR_HEIGHT;
+      // Enhanced boundary physics
+      // Add slight bounce effect when hitting the edge
+      if (newX < CAR_WIDTH / 2) {
+        newX = CAR_WIDTH / 2;
+        newVx *= -0.3; // Bounce effect
+      } else if (newX > CANVAS_WIDTH - CAR_WIDTH / 2) {
+        newX = CANVAS_WIDTH - CAR_WIDTH / 2;
+        newVx *= -0.3; // Bounce effect
       }
 
+      // Smooth vertical wrapping with speed penalty
+      if (newY < -CAR_HEIGHT) {
+        newY = CANVAS_HEIGHT;
+        // Small speed penalty for wrapping (going over the mountain)
+        newVy *= 0.8;
+        // Add to altitude when wrapping
+        setAltitude(a => a + 5);
+      } else if (newY > CANVAS_HEIGHT) {
+        newY = -CAR_HEIGHT;
+        // Small speed penalty for wrapping (going down the mountain)
+        newVy *= 0.8;
+        // Decrease altitude when wrapping downward
+        setAltitude(a => Math.max(0, a - 5));
+      }
+
+      // Calculate speed more accurately
       const newSpeed = Math.sqrt(newVx ** 2 + newVy ** 2);
 
       return {
@@ -116,27 +145,59 @@ const MountainRacing: React.FC<MountainRacingProps> = ({ onScoreUpdate }) => {
         speed: newSpeed
       };
     });
-  }, [keys, gameOver, paused]);
+  }, [keys, gameOver, paused, altitude]);
 
   const updateObstacles = useCallback(() => {
     if (gameOver || paused) return;
 
     setObstacles(prev => {
-      let newObstacles = prev.map(obstacle => ({
-        ...obstacle,
-        y: obstacle.y + speed
-      })).filter(obstacle => obstacle.y < CANVAS_HEIGHT + 100);
+      // Dynamic obstacle movement based on player speed and game state
+      const obstacleSpeed = speed * (1 + Math.abs(player.vy) * 0.1);
+      
+      let newObstacles = prev.map(obstacle => {
+        // Add slight horizontal movement based on type for more dynamic obstacles
+        let dx = 0;
+        if (obstacle.type === 'tree') {
+          // Trees sway slightly
+          dx = Math.sin(Date.now() / 1000 + obstacle.y) * 0.3;
+        }
+        
+        return {
+          ...obstacle,
+          x: obstacle.x + dx,
+          y: obstacle.y + obstacleSpeed
+        };
+      }).filter(obstacle => obstacle.y < CANVAS_HEIGHT + 100);
 
-      // Add new obstacles at the top
+      // Add new obstacles at the top with more variety
       while (newObstacles.length < 8) {
         const types: Obstacle['type'][] = ['rock', 'tree', 'cliff'];
         const type = types[Math.floor(Math.random() * types.length)];
         
+        // Make obstacle placement smarter - avoid putting them too close together
+        const existingPositions = newObstacles
+          .filter(o => o.y < 0)
+          .map(o => o.x);
+        
+        let x: number;
+        let attempts = 0;
+        do {
+          x = Math.random() * (CANVAS_WIDTH - 80);
+          attempts++;
+        } while (
+          attempts < 5 &&
+          existingPositions.some(pos => Math.abs(pos - x) < 100)
+        );
+        
+        // Vary size based on type and add slight randomness
+        const widthVariation = 0.9 + Math.random() * 0.2;
+        const heightVariation = 0.9 + Math.random() * 0.2;
+        
         newObstacles.push({
-          x: Math.random() * (CANVAS_WIDTH - 50),
-          y: -100,
-          width: type === 'cliff' ? 80 : type === 'tree' ? 30 : 40,
-          height: type === 'cliff' ? 60 : type === 'tree' ? 50 : 30,
+          x,
+          y: -100 - Math.random() * 50, // Randomize vertical start position
+          width: (type === 'cliff' ? 80 : type === 'tree' ? 30 : 40) * widthVariation,
+          height: (type === 'cliff' ? 60 : type === 'tree' ? 50 : 30) * heightVariation,
           type
         });
       }
@@ -144,29 +205,56 @@ const MountainRacing: React.FC<MountainRacingProps> = ({ onScoreUpdate }) => {
       return newObstacles;
     });
 
-    // Update score and speed
-    setScore(prev => prev + 1);
-    setAltitude(prev => prev + 0.1);
-    setSpeed(prev => Math.min(6, prev + 0.001));
-  }, [gameOver, paused, speed]);
+    // Update score and speed with more nuanced progression
+    setScore(prev => prev + 1 + Math.floor(speed));
+    setAltitude(prev => prev + 0.1 * speed);
+    setSpeed(prev => {
+      // Speed increases more at lower speeds, less at higher speeds
+      const speedIncrease = Math.max(0.0005, 0.002 - prev * 0.0002);
+      return Math.min(7, prev + speedIncrease);
+    });
+  }, [gameOver, paused, speed, player.vy]);
 
   const checkCollisions = useCallback(() => {
     if (gameOver || paused) return;
 
-    const collision = obstacles.some(obstacle =>
-      player.x < obstacle.x + obstacle.width &&
-      player.x + CAR_WIDTH > obstacle.x &&
-      player.y < obstacle.y + obstacle.height &&
-      player.y + CAR_HEIGHT > obstacle.y
-    );
+    // Enhanced collision detection with variable hitboxes
+    // Make collisions more forgiving at low speeds, stricter at high speeds
+    const collisionMargin = Math.max(5, 10 - player.speed * 0.5);
+    
+    const collision = obstacles.some(obstacle => {
+      // Adjust hitbox based on obstacle type
+      const obstacleMargin = obstacle.type === 'cliff' ? 0.1 : 0.2;
+      
+      const carLeft = player.x - (CAR_WIDTH / 2) + collisionMargin;
+      const carRight = player.x + (CAR_WIDTH / 2) - collisionMargin;
+      const carTop = player.y - (CAR_HEIGHT / 2) + collisionMargin;
+      const carBottom = player.y + (CAR_HEIGHT / 2) - collisionMargin;
+      
+      const obsLeft = obstacle.x + obstacle.width * obstacleMargin;
+      const obsRight = obstacle.x + obstacle.width * (1 - obstacleMargin);
+      const obsTop = obstacle.y + obstacle.height * obstacleMargin;
+      const obsBottom = obstacle.y + obstacle.height * (1 - obstacleMargin);
+      
+      return !(
+        carRight < obsLeft ||
+        carLeft > obsRight ||
+        carBottom < obsTop ||
+        carTop > obsBottom
+      );
+    });
 
     if (collision) {
       setGameOver(true);
       if (onScoreUpdate) {
-        onScoreUpdate(Math.floor(score + altitude * 10));
+        // More rewarding scoring system
+        const altitudeBonus = Math.floor(altitude * 15);
+        const speedBonus = Math.floor(speed * 20);
+        const finalScore = Math.floor(score + altitudeBonus + speedBonus);
+        onScoreUpdate(finalScore);
       }
     }
-  }, [obstacles, player, gameOver, paused, score, altitude, onScoreUpdate]);
+  }, [obstacles, player, gameOver, paused, score, altitude, speed, onScoreUpdate]);
 
   const resetGame = () => {
     setPlayer({
@@ -219,14 +307,46 @@ const MountainRacing: React.FC<MountainRacingProps> = ({ onScoreUpdate }) => {
     };
   }, []);
 
+  // Prevent keys from getting "stuck" when window loses focus
   useEffect(() => {
-    const gameInterval = setInterval(() => {
-      updatePlayer();
-      updateObstacles();
-      checkCollisions();
-    }, 16);
+    const handleBlur = () => {
+      setKeys(new Set());
+    };
+    
+    window.addEventListener('blur', handleBlur);
+    
+    return () => {
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, []);
 
-    return () => clearInterval(gameInterval);
+  // Replace interval-based game loop with requestAnimationFrame for better performance
+  useEffect(() => {
+    let frameId: number;
+    let lastTime = 0;
+    const FPS = 60;
+    const frameTime = 1000 / FPS;
+    let deltaTime = 0;
+    
+    const gameLoop = (timestamp: number) => {
+      if (!lastTime) lastTime = timestamp;
+      deltaTime += timestamp - lastTime;
+      lastTime = timestamp;
+      
+      // Update with fixed time step for consistent physics
+      while (deltaTime >= frameTime) {
+        updatePlayer();
+        updateObstacles();
+        checkCollisions();
+        deltaTime -= frameTime;
+      }
+      
+      frameId = requestAnimationFrame(gameLoop);
+    };
+    
+    frameId = requestAnimationFrame(gameLoop);
+    
+    return () => cancelAnimationFrame(frameId);
   }, [updatePlayer, updateObstacles, checkCollisions]);
 
   const getObstacleColor = (type: Obstacle['type']) => {

@@ -25,6 +25,15 @@ interface Player extends Position {
   score: number;
 }
 
+interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  color: string;
+}
+
 const Tennis: React.FC<TennisProps> = ({ onScoreUpdate }) => {
   const [player, setPlayer] = useState<Player>({ 
     x: 50, 
@@ -45,6 +54,27 @@ const Tennis: React.FC<TennisProps> = ({ onScoreUpdate }) => {
   const [paused, setPaused] = useState(false);
   const [keys, setKeys] = useState<Set<string>>(new Set());
   const [rally, setRally] = useState(0);
+  const [maxRally, setMaxRally] = useState(0);
+  const [particles, setParticles] = useState<Particle[]>([]);
+  const [ballTrail, setBallTrail] = useState<Position[]>([]);
+  const [difficulty, setDifficulty] = useState(1);
+
+  const createParticles = (x: number, y: number, color: string, count: number = 8) => {
+    const newParticles: Particle[] = [];
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2;
+      const speed = 2 + Math.random() * 3;
+      newParticles.push({
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 1,
+        color
+      });
+    }
+    setParticles(prev => [...prev, ...newParticles]);
+  };
 
   const resetBall = (winner: 'player' | 'computer') => {
     setBall({ x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 });
@@ -52,7 +82,9 @@ const Tennis: React.FC<TennisProps> = ({ onScoreUpdate }) => {
       dx: winner === 'player' ? 4 : -4, 
       dy: (Math.random() - 0.5) * 4 
     });
+    setMaxRally(prev => Math.max(prev, rally));
     setRally(0);
+    setBallTrail([]);
   };
 
   const resetGame = () => {
@@ -60,6 +92,9 @@ const Tennis: React.FC<TennisProps> = ({ onScoreUpdate }) => {
     setComputer({ x: CANVAS_WIDTH - 70, y: CANVAS_HEIGHT / 2 - PADDLE_HEIGHT / 2, score: 0 });
     setGameOver(false);
     setPaused(false);
+    setMaxRally(0);
+    setParticles([]);
+    setDifficulty(1);
     resetBall('player');
   };
 
@@ -78,29 +113,36 @@ const Tennis: React.FC<TennisProps> = ({ onScoreUpdate }) => {
     // Update player position
     setPlayer(prev => {
       let newY = prev.y;
-      if (keys.has('ArrowUp')) {
+      if (keys.has('ArrowUp') || keys.has('w') || keys.has('W')) {
         newY = Math.max(0, prev.y - 6);
       }
-      if (keys.has('ArrowDown')) {
+      if (keys.has('ArrowDown') || keys.has('s') || keys.has('S')) {
         newY = Math.min(CANVAS_HEIGHT - PADDLE_HEIGHT, prev.y + 6);
       }
       return { ...prev, y: newY };
     });
 
-    // Update computer AI
+    // Update computer AI with adaptive difficulty
     setComputer(prev => {
       const ballCenterY = ball.y;
       const paddleCenterY = prev.y + PADDLE_HEIGHT / 2;
-      const speed = 4;
+      const baseSpeed = 3 + difficulty * 0.5;
+      const prediction = ballCenterY + ballVelocity.dy * 10; // Predict ball movement
       
       let newY = prev.y;
-      if (ballCenterY < paddleCenterY - 10) {
-        newY = Math.max(0, prev.y - speed);
-      } else if (ballCenterY > paddleCenterY + 10) {
-        newY = Math.min(CANVAS_HEIGHT - PADDLE_HEIGHT, prev.y + speed);
+      if (prediction < paddleCenterY - 15) {
+        newY = Math.max(0, prev.y - baseSpeed);
+      } else if (prediction > paddleCenterY + 15) {
+        newY = Math.min(CANVAS_HEIGHT - PADDLE_HEIGHT, prev.y + baseSpeed);
       }
       
       return { ...prev, y: newY };
+    });
+
+    // Update ball trail
+    setBallTrail(prev => {
+      const newTrail = [...prev, { x: ball.x, y: ball.y }];
+      return newTrail.slice(-10); // Keep last 10 positions
     });
 
     // Update ball
@@ -114,26 +156,32 @@ const Tennis: React.FC<TennisProps> = ({ onScoreUpdate }) => {
       if (newBall.y <= BALL_SIZE / 2 || newBall.y >= CANVAS_HEIGHT - BALL_SIZE / 2) {
         setBallVelocity(prev => ({ ...prev, dy: -prev.dy }));
         newBall.y = Math.max(BALL_SIZE / 2, Math.min(CANVAS_HEIGHT - BALL_SIZE / 2, newBall.y));
+        createParticles(newBall.x, newBall.y, '#22d3ee', 5);
       }
 
       // Player paddle collision
       if (checkCollision(newBall, player) && ballVelocity.dx < 0) {
+        const hitPosition = (newBall.y - (player.y + PADDLE_HEIGHT / 2)) / (PADDLE_HEIGHT / 2);
         setBallVelocity(prev => ({ 
           dx: -prev.dx * 1.05,
-          dy: prev.dy + (Math.random() - 0.5) * 2
+          dy: prev.dy + hitPosition * 3
         }));
         setRally(prev => prev + 1);
+        setDifficulty(prev => Math.min(3, prev + 0.05));
         newBall.x = player.x + PADDLE_WIDTH + BALL_SIZE / 2;
+        createParticles(newBall.x, newBall.y, '#60a5fa', 8);
       }
 
       // Computer paddle collision
       if (checkCollision(newBall, computer) && ballVelocity.dx > 0) {
+        const hitPosition = (newBall.y - (computer.y + PADDLE_HEIGHT / 2)) / (PADDLE_HEIGHT / 2);
         setBallVelocity(prev => ({ 
           dx: -prev.dx * 1.05,
-          dy: prev.dy + (Math.random() - 0.5) * 2
+          dy: prev.dy + hitPosition * 3
         }));
         setRally(prev => prev + 1);
         newBall.x = computer.x - BALL_SIZE / 2;
+        createParticles(newBall.x, newBall.y, '#f87171', 8);
       }
 
       // Scoring
@@ -145,31 +193,50 @@ const Tennis: React.FC<TennisProps> = ({ onScoreUpdate }) => {
           }
           return { ...prev, score: newScore };
         });
+        createParticles(0, newBall.y, '#f87171', 15);
         resetBall('computer');
         return { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 };
       }
 
       if (newBall.x > CANVAS_WIDTH) {
         setPlayer(prev => {
-          const newScore = prev.score + 1 + rally;
+          const rallyBonus = Math.floor(rally / 5);
+          const newScore = prev.score + 1 + rallyBonus;
           if (newScore >= 11) {
             setGameOver(true);
-            if (onScoreUpdate) onScoreUpdate(newScore * 10);
+            if (onScoreUpdate) onScoreUpdate(newScore * 10 + maxRally * 5);
           }
           return { ...prev, score: newScore };
         });
+        createParticles(CANVAS_WIDTH, newBall.y, '#60a5fa', 15);
         resetBall('player');
         return { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 };
       }
 
       return newBall;
     });
-  }, [keys, ball, ballVelocity, player, computer, gameOver, paused, rally, onScoreUpdate]);
+  }, [keys, ball, ballVelocity, player, computer, gameOver, paused, rally, maxRally, difficulty, onScoreUpdate]);
+
+  // Update particles
+  useEffect(() => {
+    const particleInterval = setInterval(() => {
+      setParticles(prev => prev.map(particle => ({
+        ...particle,
+        x: particle.x + particle.vx,
+        y: particle.y + particle.vy,
+        vx: particle.vx * 0.98,
+        vy: particle.vy * 0.98,
+        life: particle.life - 0.02
+      })).filter(particle => particle.life > 0));
+    }, 16);
+
+    return () => clearInterval(particleInterval);
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      e.preventDefault();
       if (e.key === ' ') {
+        e.preventDefault();
         setPaused(prev => !prev);
         return;
       }
@@ -177,7 +244,6 @@ const Tennis: React.FC<TennisProps> = ({ onScoreUpdate }) => {
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      e.preventDefault();
       setKeys(prev => {
         const newKeys = new Set(prev);
         newKeys.delete(e.key);
@@ -207,7 +273,8 @@ const Tennis: React.FC<TennisProps> = ({ onScoreUpdate }) => {
         <div className="flex items-center justify-between mb-4">
           <div className="text-cyan-400 retro-font">
             <div className="text-lg font-bold">TENNIS</div>
-            <div className="text-sm">Rally: {rally}</div>
+            <div className="text-sm">Rally: {rally} | Best: {maxRally}</div>
+            <div className="text-sm">Difficulty: {difficulty.toFixed(1)}</div>
           </div>
           <div className="text-white text-xl font-bold retro-font">
             {player.score} - {computer.score}
@@ -230,12 +297,12 @@ const Tennis: React.FC<TennisProps> = ({ onScoreUpdate }) => {
         </div>
 
         <div
-          className="relative bg-green-600 border-2 border-gray-600"
+          className="relative bg-gradient-to-b from-green-400 to-green-600 border-4 border-gray-800 rounded-lg overflow-hidden"
           style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
         >
           {/* Court lines */}
           <div
-            className="absolute bg-white"
+            className="absolute bg-white shadow-sm"
             style={{
               left: CANVAS_WIDTH / 2 - 1,
               top: 0,
@@ -246,27 +313,45 @@ const Tennis: React.FC<TennisProps> = ({ onScoreUpdate }) => {
           
           {/* Service lines */}
           <div
-            className="absolute bg-white"
+            className="absolute bg-white opacity-80"
             style={{
-              left: CANVAS_WIDTH / 4,
+              left: CANVAS_WIDTH / 4 - 1,
               top: CANVAS_HEIGHT / 4,
               width: 2,
               height: CANVAS_HEIGHT / 2
             }}
           />
           <div
-            className="absolute bg-white"
+            className="absolute bg-white opacity-80"
             style={{
-              left: (CANVAS_WIDTH * 3) / 4,
+              left: (CANVAS_WIDTH * 3) / 4 - 1,
               top: CANVAS_HEIGHT / 4,
               width: 2,
               height: CANVAS_HEIGHT / 2
             }}
           />
 
+          {/* Court boundaries */}
+          <div className="absolute inset-0 border-2 border-white opacity-60 rounded-lg" />
+
+          {/* Ball trail */}
+          {ballTrail.map((pos, index) => (
+            <div
+              key={index}
+              className="absolute bg-yellow-300 rounded-full"
+              style={{
+                left: pos.x - 3,
+                top: pos.y - 3,
+                width: 6,
+                height: 6,
+                opacity: (index / ballTrail.length) * 0.5
+              }}
+            />
+          ))}
+
           {/* Player paddle */}
           <div
-            className="absolute bg-blue-400"
+            className="absolute bg-gradient-to-r from-blue-400 to-blue-600 border-2 border-blue-800 rounded shadow-lg"
             style={{
               left: player.x,
               top: player.y,
@@ -277,7 +362,7 @@ const Tennis: React.FC<TennisProps> = ({ onScoreUpdate }) => {
 
           {/* Computer paddle */}
           <div
-            className="absolute bg-red-400"
+            className="absolute bg-gradient-to-r from-red-400 to-red-600 border-2 border-red-800 rounded shadow-lg"
             style={{
               left: computer.x,
               top: computer.y,
@@ -288,18 +373,53 @@ const Tennis: React.FC<TennisProps> = ({ onScoreUpdate }) => {
 
           {/* Ball */}
           <div
-            className="absolute bg-yellow-400 rounded-full"
+            className="absolute bg-gradient-to-br from-yellow-300 to-yellow-500 border-2 border-yellow-600 rounded-full shadow-lg"
             style={{
               left: ball.x - BALL_SIZE / 2,
               top: ball.y - BALL_SIZE / 2,
               width: BALL_SIZE,
-              height: BALL_SIZE
+              height: BALL_SIZE,
+              boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
             }}
           />
+
+          {/* Particles */}
+          {particles.map((particle, index) => (
+            <div
+              key={index}
+              className="absolute rounded-full"
+              style={{
+                left: particle.x - 2,
+                top: particle.y - 2,
+                width: 4,
+                height: 4,
+                backgroundColor: particle.color,
+                opacity: particle.life
+              }}
+            />
+          ))}
+
+          {/* Rally streak indicator */}
+          {rally > 5 && (
+            <div className="absolute top-4 left-1/2 transform -translate-x-1/2">
+              <div className="bg-black bg-opacity-75 px-3 py-1 rounded border border-yellow-400">
+                <div className="text-yellow-400 font-bold text-sm retro-font">
+                  {rally} HIT RALLY!
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Speed indicator */}
+          <div className="absolute top-4 right-4 bg-black bg-opacity-75 p-2 rounded border border-cyan-400">
+            <div className="text-cyan-400 text-xs retro-font">
+              Speed: {Math.abs(ballVelocity.dx).toFixed(1)}
+            </div>
+          </div>
         </div>
 
         <div className="mt-4 text-center text-sm text-cyan-400 retro-font">
-          <p>↑↓ - Move Paddle • Space - Pause • First to 11 wins!</p>
+          <p>↑↓ or WASD - Move Paddle • Space - Pause • First to 11 wins!</p>
         </div>
 
         {gameOver && winner && (
@@ -309,17 +429,22 @@ const Tennis: React.FC<TennisProps> = ({ onScoreUpdate }) => {
             }`}>
               {winner} Wins!
             </div>
+            <div className="text-cyan-400 mb-4 retro-font">
+              <p>Final Score: {player.score} - {computer.score}</p>
+              <p>Best Rally: {maxRally} hits</p>
+              {winner === 'Player' && maxRally > 10 && <p className="text-yellow-400">Amazing rallies!</p>}
+            </div>
             <button
               onClick={resetGame}
-              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded border border-cyan-400"
+              className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded font-bold border-2 border-cyan-400"
             >
-              Play Again
+              PLAY AGAIN
             </button>
           </div>
         )}
 
         {paused && !gameOver && (
-          <div className="mt-4 text-center text-yellow-400 text-lg font-bold retro-font">
+          <div className="mt-4 text-center text-yellow-400 text-xl font-bold retro-font">
             PAUSED
           </div>
         )}

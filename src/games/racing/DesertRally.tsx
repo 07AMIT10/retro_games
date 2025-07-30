@@ -60,9 +60,12 @@ const DesertRally: React.FC<DesertRallyProps> = ({ onScoreUpdate }) => {
       const types: Obstacle['type'][] = ['cactus', 'rock', 'dune'];
       const type = types[Math.floor(Math.random() * types.length)];
       
+      // Ensure obstacles don't spawn directly on player's starting position
+      const obsX = Math.random() * (CANVAS_WIDTH - 100) + 50;
+      
       newObstacles.push({
-        x: Math.random() * (CANVAS_WIDTH - 50),
-        y: -i * 80 - 100,
+        x: obsX,
+        y: -i * 100 - 100, // Spread them out more vertically
         width: type === 'dune' ? 80 : type === 'cactus' ? 25 : 40,
         height: type === 'dune' ? 40 : type === 'cactus' ? 60 : 30,
         type
@@ -75,7 +78,7 @@ const DesertRally: React.FC<DesertRallyProps> = ({ onScoreUpdate }) => {
     if (player.speed > 2) {
       setDustClouds(prev => [...prev, {
         x: x + (Math.random() - 0.5) * CAR_WIDTH,
-        y: y + CAR_HEIGHT,
+        y: y + CAR_HEIGHT / 2, // Adjust position to be behind the car
         life: 30,
         size: 5 + Math.random() * 10
       }]);
@@ -86,68 +89,108 @@ const DesertRally: React.FC<DesertRallyProps> = ({ onScoreUpdate }) => {
     if (gameOver || paused) return;
 
     setPlayer(prev => {
+      // Decouple steering from velocity for better control
       let newVx = prev.vx;
       let newVy = prev.vy;
       let newAngle = prev.angle;
       let newDrift = prev.drift;
 
-      // Steering with drift mechanics
+      // Apply friction to slow down gradually - adjusted for better feel
+      const FRICTION = 0.96; // Slightly less friction for smoother movement
+      newVx *= FRICTION;
+      newVy *= FRICTION;
+      
+      // Calculate current direction of travel
+      const direction = Math.atan2(newVy, newVx);
+
+      // Steering with drift mechanics - improved responsiveness
       if (keys.has('ArrowLeft')) {
-        if (prev.speed > 4) {
-          newDrift = Math.min(0.3, prev.drift + 0.05);
-          newAngle -= 0.08 + newDrift;
+        if (prev.speed > 3) {
+          // Drift more at higher speeds but cap the maximum drift
+          newDrift = Math.min(0.35, prev.drift + 0.025);
+          newAngle -= 0.05 + newDrift;
         } else {
+          // Better low-speed turning
           newAngle -= 0.05;
         }
-        newVx = Math.max(-6, prev.vx - 0.4);
       } else if (keys.has('ArrowRight')) {
-        if (prev.speed > 4) {
-          newDrift = Math.min(0.3, prev.drift + 0.05);
-          newAngle += 0.08 + newDrift;
+        if (prev.speed > 3) {
+          // Drift more at higher speeds but cap the maximum drift
+          newDrift = Math.min(0.35, prev.drift + 0.025);
+          newAngle += 0.05 + newDrift;
         } else {
+          // Better low-speed turning
           newAngle += 0.05;
         }
-        newVx = Math.min(6, prev.vx + 0.4);
       } else {
+        // Gradually reduce drift when not turning - smoother reduction
         newDrift *= 0.9;
-        newVx *= 0.85;
       }
 
-      // Acceleration/Braking
+      // Apply force in the direction the car is facing
+      const ACCELERATION = 0.35; // Increased acceleration for better responsiveness
+      const BRAKE_POWER = 0.45; // Slightly reduced brake power for smoother braking
+      
+      // Acceleration - improved acceleration curve
       if (keys.has('ArrowUp')) {
-        newVy = Math.max(-8, prev.vy - 0.5);
-      } else if (keys.has('ArrowDown')) {
-        newVy = Math.min(3, prev.vy + 0.8); // Brake/reverse
-      } else {
-        newVy = prev.vy * 0.9;
+        // Apply force in the direction the car is pointing with speed-dependent acceleration
+        const accelerationFactor = Math.max(0.2, ACCELERATION - (prev.speed * 0.05));
+        newVx += Math.cos(newAngle) * accelerationFactor;
+        newVy += Math.sin(newAngle) * accelerationFactor;
+      } 
+      // Braking - improved braking feel
+      else if (keys.has('ArrowDown')) {
+        if (prev.speed > 0.5) {
+          // Slow down by applying opposite force - smoother braking
+          newVx *= (1 - BRAKE_POWER);
+          newVy *= (1 - BRAKE_POWER);
+        } else {
+          // Allow reversing if almost stopped - better reverse control
+          newVx -= Math.cos(newAngle) * 0.15;
+          newVy -= Math.sin(newAngle) * 0.15;
+        }
       }
 
-      // Turbo boost
+      // Turbo boost - improved boost mechanics
       if (keys.has(' ') && turbo > 0) {
-        newVy = Math.max(-12, newVy - 0.8);
-        setTurbo(prev => Math.max(0, prev - 2));
+        // Apply additional force in current direction - more impactful boost
+        newVx += Math.cos(newAngle) * 0.7;
+        newVy += Math.sin(newAngle) * 0.7;
+        // Reduce turbo consumption slightly
+        setTurbo(prev => Math.max(0, prev - 1.3));
+        // Create more dust for visual effect
+        createDust(prev.x, prev.y);
         createDust(prev.x, prev.y);
       } else if (turbo < 100) {
+        // Faster turbo regeneration for better gameplay flow
         setTurbo(prev => Math.min(100, prev + 0.2));
       }
 
+      // Calculate new position
       let newX = prev.x + newVx;
       let newY = prev.y + newVy;
 
-      // Keep on screen horizontally
-      newX = Math.max(CAR_WIDTH / 2, Math.min(CANVAS_WIDTH - CAR_WIDTH / 2, newX));
+      // Keep on screen horizontally with bouncing effect - more forgiving boundaries
+      if (newX < CAR_WIDTH / 2) {
+        newX = CAR_WIDTH / 2;
+        newVx *= -0.4; // Reduced bounce for better feel
+      } else if (newX > CANVAS_WIDTH - CAR_WIDTH / 2) {
+        newX = CANVAS_WIDTH - CAR_WIDTH / 2;
+        newVx *= -0.4; // Reduced bounce for better feel
+      }
 
-      // Wrap vertically
+      // Wrap vertically for continuous scrolling effect
       if (newY < -CAR_HEIGHT) {
         newY = CANVAS_HEIGHT;
       } else if (newY > CANVAS_HEIGHT) {
         newY = -CAR_HEIGHT;
       }
 
-      const newSpeed = Math.sqrt(newVx ** 2 + newVy ** 2);
+      // Calculate speed from velocity components
+      const newSpeed = Math.sqrt(newVx * newVx + newVy * newVy);
 
-      // Create dust when moving fast
-      if (Math.random() < 0.3 && newSpeed > 3) {
+      // Create dust when moving fast or drifting - improved dust generation
+      if ((Math.random() < 0.3 && newSpeed > 2) || newDrift > 0.15) {
         createDust(newX, newY);
       }
 
@@ -177,9 +220,12 @@ const DesertRally: React.FC<DesertRallyProps> = ({ onScoreUpdate }) => {
         const types: Obstacle['type'][] = ['cactus', 'rock', 'dune'];
         const type = types[Math.floor(Math.random() * types.length)];
         
+        // Ensure obstacles don't spawn in the exact same column
+        const obsX = Math.random() * (CANVAS_WIDTH - 100) + 50;
+        
         newObstacles.push({
-          x: Math.random() * (CANVAS_WIDTH - 50),
-          y: -100,
+          x: obsX,
+          y: -100 - Math.random() * 50, // Add some randomness to vertical spacing
           width: type === 'dune' ? 80 : type === 'cactus' ? 25 : 40,
           height: type === 'dune' ? 40 : type === 'cactus' ? 60 : 30,
           type
@@ -192,7 +238,9 @@ const DesertRally: React.FC<DesertRallyProps> = ({ onScoreUpdate }) => {
     // Update score and speed
     setScore(prev => prev + 1);
     setDistance(prev => prev + 0.1);
-    setSpeed(prev => Math.min(6, prev + 0.002));
+    
+    // Gradually increase speed for difficulty progression
+    setSpeed(prev => Math.min(7, prev + 0.001));
   }, [gameOver, paused, speed]);
 
   const updateDust = useCallback(() => {
@@ -202,21 +250,39 @@ const DesertRally: React.FC<DesertRallyProps> = ({ onScoreUpdate }) => {
       prev.map(dust => ({
         ...dust,
         life: dust.life - 1,
-        y: dust.y + 1,
-        size: dust.size * 1.05
+        y: dust.y + speed * 0.7, // Move with the obstacles
+        size: dust.size * 1.03 // Grow slightly as they fade
       })).filter(dust => dust.life > 0)
     );
-  }, [gameOver, paused]);
+  }, [gameOver, paused, speed]);
 
   const checkCollisions = useCallback(() => {
     if (gameOver || paused) return;
 
-    const collision = obstacles.some(obstacle =>
-      player.x < obstacle.x + obstacle.width &&
-      player.x + CAR_WIDTH > obstacle.x &&
-      player.y < obstacle.y + obstacle.height &&
-      player.y + CAR_HEIGHT > obstacle.y
-    );
+    // Even more forgiving collision detection with smaller car hitbox
+    const playerHitbox = {
+      x: player.x - CAR_WIDTH * 0.35,
+      y: player.y - CAR_HEIGHT * 0.35,
+      width: CAR_WIDTH * 0.7,
+      height: CAR_HEIGHT * 0.7
+    };
+
+    // Adjust obstacle hitboxes based on type for better gameplay
+    const collision = obstacles.some(obstacle => {
+      // Different hitbox sizes for different obstacle types
+      const obstacleHitbox = {
+        x: obstacle.x + (obstacle.type === 'dune' ? obstacle.width * 0.15 : obstacle.width * 0.1),
+        y: obstacle.y + (obstacle.type === 'cactus' ? obstacle.height * 0.2 : obstacle.height * 0.1),
+        width: obstacle.width * (obstacle.type === 'dune' ? 0.7 : obstacle.type === 'cactus' ? 0.6 : 0.8),
+        height: obstacle.height * (obstacle.type === 'dune' ? 0.7 : obstacle.type === 'cactus' ? 0.6 : 0.8)
+      };
+      
+      // Check collision with adjusted hitboxes
+      return playerHitbox.x < obstacleHitbox.x + obstacleHitbox.width &&
+        playerHitbox.x + playerHitbox.width > obstacleHitbox.x &&
+        playerHitbox.y < obstacleHitbox.y + obstacleHitbox.height &&
+        playerHitbox.y + playerHitbox.height > obstacleHitbox.y;
+    });
 
     if (collision) {
       setGameOver(true);
@@ -254,8 +320,12 @@ const DesertRally: React.FC<DesertRallyProps> = ({ onScoreUpdate }) => {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      e.preventDefault();
-      if (e.key === 'p' || e.key === 'P') {
+      // Only prevent default for arrow keys and space to avoid blocking other keyboard shortcuts
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+        e.preventDefault();
+      }
+      
+      if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
         setPaused(prev => !prev);
         return;
       }
@@ -263,7 +333,10 @@ const DesertRally: React.FC<DesertRallyProps> = ({ onScoreUpdate }) => {
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      e.preventDefault();
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+        e.preventDefault();
+      }
+      
       setKeys(prev => {
         const newKeys = new Set(prev);
         newKeys.delete(e.key);
@@ -281,15 +354,49 @@ const DesertRally: React.FC<DesertRallyProps> = ({ onScoreUpdate }) => {
   }, []);
 
   useEffect(() => {
-    const gameInterval = setInterval(() => {
-      updatePlayer();
-      updateObstacles();
-      updateDust();
-      checkCollisions();
-    }, 16);
+    // Prevent keys from getting "stuck" when window loses focus
+    const handleBlur = () => {
+      setKeys(new Set());
+    };
+    
+    window.addEventListener('blur', handleBlur);
+    
+    return () => {
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, []);
 
-    return () => clearInterval(gameInterval);
-  }, [updatePlayer, updateObstacles, updateDust, checkCollisions]);
+  useEffect(() => {
+    // Use requestAnimationFrame for smoother game loop
+    let frameId: number;
+    let lastTime = 0;
+    const FPS = 60;
+    const frameTime = 1000 / FPS;
+    let deltaTime = 0;
+    
+    const gameLoop = (timestamp: number) => {
+      if (!lastTime) lastTime = timestamp;
+      deltaTime += timestamp - lastTime;
+      lastTime = timestamp;
+      
+      // Update with fixed time step for consistent physics
+      while (deltaTime >= frameTime) {
+        if (!paused && !gameOver) {
+          updatePlayer();
+          updateObstacles();
+          updateDust();
+          checkCollisions();
+        }
+        deltaTime -= frameTime;
+      }
+      
+      frameId = requestAnimationFrame(gameLoop);
+    };
+    
+    frameId = requestAnimationFrame(gameLoop);
+    
+    return () => cancelAnimationFrame(frameId);
+  }, [updatePlayer, updateObstacles, updateDust, checkCollisions, paused, gameOver]);
 
   const getObstacleColor = (type: Obstacle['type']) => {
     switch (type) {

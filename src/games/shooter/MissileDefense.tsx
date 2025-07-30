@@ -7,10 +7,9 @@ interface MissileDefenseProps {
 
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
-const CITY_WIDTH = 80;
-const CITY_HEIGHT = 40;
+const CITY_WIDTH = 40;
+const CITY_HEIGHT = 30;
 const MISSILE_SPEED = 2;
-const DEFENSE_MISSILE_SPEED = 8;
 
 interface Position {
   x: number;
@@ -23,6 +22,20 @@ interface Missile extends Position {
   speed: number;
   active: boolean;
   type: 'enemy' | 'defense';
+  trail: Position[];
+}
+
+interface City extends Position {
+  active: boolean;
+  health: number;
+  population: number;
+}
+
+interface DefenseBase extends Position {
+  missiles: number;
+  active: boolean;
+  reloadTimer: number;
+  range: number;
 }
 
 interface Explosion extends Position {
@@ -30,29 +43,22 @@ interface Explosion extends Position {
   maxRadius: number;
   growing: boolean;
   type: 'defense' | 'enemy';
-}
-
-interface City extends Position {
-  active: boolean;
-  health: number;
-}
-
-interface DefenseBase extends Position {
-  missiles: number;
-  active: boolean;
+  timer: number;
 }
 
 const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
   const [missiles, setMissiles] = useState<Missile[]>([]);
-  const [explosions, setExplosions] = useState<Explosion[]>([]);
   const [cities, setCities] = useState<City[]>([]);
   const [defenseBases, setDefenseBases] = useState<DefenseBase[]>([]);
+  const [explosions, setExplosions] = useState<Explosion[]>([]);
   const [score, setScore] = useState(0);
   const [level, setLevel] = useState(1);
   const [gameOver, setGameOver] = useState(false);
   const [paused, setPaused] = useState(false);
   const [mousePos, setMousePos] = useState<Position>({ x: 0, y: 0 });
   const [selectedBase, setSelectedBase] = useState<number>(0);
+  const [waveProgress, setWaveProgress] = useState(0);
+  const [maxWaveMissiles] = useState(10);
 
   const createCities = useCallback(() => {
     const newCities: City[] = [];
@@ -61,7 +67,8 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
         x: 100 + i * 120,
         y: CANVAS_HEIGHT - CITY_HEIGHT - 10,
         active: true,
-        health: 3
+        health: 3,
+        population: 10000 + Math.random() * 40000
       });
     }
     return newCities;
@@ -69,50 +76,71 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
 
   const createDefenseBases = useCallback(() => {
     return [
-      { x: 50, y: CANVAS_HEIGHT - 60, missiles: 10, active: true },
-      { x: CANVAS_WIDTH / 2 - 25, y: CANVAS_HEIGHT - 60, missiles: 10, active: true },
-      { x: CANVAS_WIDTH - 100, y: CANVAS_HEIGHT - 60, missiles: 10, active: true }
+      { x: 50, y: CANVAS_HEIGHT - 60, missiles: 10, active: true, reloadTimer: 0, range: 200 },
+      { x: CANVAS_WIDTH / 2 - 25, y: CANVAS_HEIGHT - 60, missiles: 10, active: true, reloadTimer: 0, range: 250 },
+      { x: CANVAS_WIDTH - 100, y: CANVAS_HEIGHT - 60, missiles: 10, active: true, reloadTimer: 0, range: 200 }
     ];
   }, []);
 
   const spawnEnemyMissile = useCallback(() => {
-    if (Math.random() < 0.01 + level * 0.005) {
+    if (waveProgress >= maxWaveMissiles + level * 5) return;
+
+    const spawnChance = 0.008 + level * 0.002;
+    if (Math.random() < spawnChance) {
       const startX = Math.random() * CANVAS_WIDTH;
-      const targetX = Math.random() * CANVAS_WIDTH;
-      const targetY = CANVAS_HEIGHT - 20;
+      const targets = [
+        ...cities.filter(c => c.active).map(c => ({ x: c.x + CITY_WIDTH/2, y: c.y + CITY_HEIGHT/2, priority: 2 })),
+        ...defenseBases.filter(b => b.active).map(b => ({ x: b.x + 25, y: b.y + 25, priority: 1 }))
+      ];
+      
+      if (targets.length === 0) return;
+      
+      // Weighted target selection
+      const weightedTargets = targets.flatMap(target => 
+        Array(target.priority).fill(target)
+      );
+      const target = weightedTargets[Math.floor(Math.random() * weightedTargets.length)];
 
       setMissiles(prev => [...prev, {
         x: startX,
         y: 0,
-        targetX,
-        targetY,
+        targetX: target.x + (Math.random() - 0.5) * 40,
+        targetY: target.y,
         speed: MISSILE_SPEED + level * 0.3,
         active: true,
-        type: 'enemy'
+        type: 'enemy',
+        trail: []
       }]);
+      
+      setWaveProgress(prev => prev + 1);
     }
-  }, [level]);
+  }, [level, cities, defenseBases, waveProgress, maxWaveMissiles]);
 
   const fireDefenseMissile = useCallback((targetX: number, targetY: number) => {
-    if (gameOver || paused) return;
+    const base = defenseBases[selectedBase];
+    if (!base || !base.active || base.missiles <= 0 || base.reloadTimer > 0) return;
 
-    const activeBase = defenseBases[selectedBase];
-    if (!activeBase.active || activeBase.missiles <= 0) return;
+    // Check if target is in range
+    const distance = Math.sqrt((targetX - base.x) ** 2 + (targetY - base.y) ** 2);
+    if (distance > base.range) return;
 
     setMissiles(prev => [...prev, {
-      x: activeBase.x + 25,
-      y: activeBase.y,
+      x: base.x + 25,
+      y: base.y,
       targetX,
       targetY,
-      speed: DEFENSE_MISSILE_SPEED,
+      speed: 6,
       active: true,
-      type: 'defense'
+      type: 'defense',
+      trail: []
     }]);
 
-    setDefenseBases(prev => prev.map((base, index) => 
-      index === selectedBase ? { ...base, missiles: base.missiles - 1 } : base
+    setDefenseBases(prev => prev.map((b, idx) => 
+      idx === selectedBase 
+        ? { ...b, missiles: b.missiles - 1, reloadTimer: 30 }
+        : b
     ));
-  }, [defenseBases, selectedBase, gameOver, paused]);
+  }, [selectedBase, defenseBases]);
 
   const updateMissiles = useCallback(() => {
     if (gameOver || paused) return;
@@ -125,15 +153,20 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
         const dy = missile.targetY - missile.y;
         const distance = Math.sqrt(dx ** 2 + dy ** 2);
 
+        // Add to trail
+        const newTrail = [...missile.trail, { x: missile.x, y: missile.y }];
+        if (newTrail.length > 8) newTrail.shift();
+
         if (distance < missile.speed) {
           // Missile reached target
           setExplosions(prevExp => [...prevExp, {
             x: missile.targetX,
             y: missile.targetY,
             radius: 0,
-            maxRadius: missile.type === 'defense' ? 80 : 40,
+            maxRadius: missile.type === 'defense' ? 100 : 50,
             growing: true,
-            type: missile.type
+            type: missile.type,
+            timer: 0
           }]);
 
           return { ...missile, active: false };
@@ -145,7 +178,8 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
         return {
           ...missile,
           x: missile.x + moveX,
-          y: missile.y + moveY
+          y: missile.y + moveY,
+          trail: newTrail
         };
       }).filter(missile => missile.active)
     );
@@ -159,14 +193,17 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
     setExplosions(prev => 
       prev.map(explosion => {
         if (explosion.growing) {
-          const newRadius = explosion.radius + 4;
+          const newRadius = explosion.radius + 3;
           if (newRadius >= explosion.maxRadius) {
-            return { ...explosion, radius: explosion.maxRadius, growing: false };
+            return { ...explosion, radius: explosion.maxRadius, growing: false, timer: 60 };
           }
           return { ...explosion, radius: newRadius };
         } else {
-          const newRadius = explosion.radius - 2;
-          return { ...explosion, radius: Math.max(0, newRadius) };
+          const newTimer = explosion.timer - 1;
+          if (newTimer <= 0) {
+            return { ...explosion, radius: 0 };
+          }
+          return { ...explosion, timer: newTimer };
         }
       }).filter(explosion => explosion.radius > 0)
     );
@@ -175,14 +212,12 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
   const checkCollisions = useCallback(() => {
     if (gameOver || paused) return;
 
-    // Missile vs explosion collisions
+    // Explosion vs missiles
     setMissiles(prevMissiles => {
       let newMissiles = [...prevMissiles];
       let pointsEarned = 0;
 
       explosions.forEach(explosion => {
-        if (explosion.type !== 'defense') return;
-
         newMissiles.forEach((missile, index) => {
           if (!missile.active || missile.type !== 'enemy') return;
 
@@ -192,7 +227,7 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
 
           if (distance <= explosion.radius) {
             newMissiles[index] = { ...missile, active: false };
-            pointsEarned += 25;
+            pointsEarned += 25 * level;
           }
         });
       });
@@ -204,7 +239,7 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
       return newMissiles.filter(missile => missile.active);
     });
 
-    // Explosion vs city/base collisions
+    // Explosion vs cities and bases
     setCities(prevCities => 
       prevCities.map(city => {
         if (!city.active) return city;
@@ -224,7 +259,8 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
           return { 
             ...city, 
             health: newHealth, 
-            active: newHealth > 0 
+            active: newHealth > 0,
+            population: newHealth > 0 ? city.population * 0.7 : 0
           };
         }
 
@@ -250,6 +286,12 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
       })
     );
 
+    // Update base reload timers
+    setDefenseBases(prev => prev.map(base => ({
+      ...base,
+      reloadTimer: Math.max(0, base.reloadTimer - 1)
+    })));
+
     // Check game over conditions
     const activeCities = cities.filter(city => city.active);
     const activeBases = defenseBases.filter(base => base.active);
@@ -260,19 +302,20 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
     }
 
     // Check wave complete
-    if (missiles.length === 0 && explosions.length === 0) {
-      const bonusPoints = activeCities.length * 100 + 
+    if (missiles.length === 0 && explosions.length === 0 && waveProgress >= maxWaveMissiles + level * 5) {
+      const bonusPoints = activeCities.reduce((sum, city) => sum + city.population / 100, 0) + 
                          activeBases.reduce((sum, base) => sum + base.missiles * 5, 0);
-      setScore(prev => prev + bonusPoints);
+      setScore(prev => prev + Math.floor(bonusPoints));
       setLevel(prev => prev + 1);
+      setWaveProgress(0);
       
       // Restore some missiles to bases
       setDefenseBases(prev => prev.map(base => ({
         ...base,
-        missiles: base.active ? Math.min(10, base.missiles + 5) : base.missiles
+        missiles: base.active ? Math.min(10, base.missiles + 3) : base.missiles
       })));
     }
-  }, [explosions, cities, defenseBases, missiles, gameOver, paused, score, onScoreUpdate]);
+  }, [explosions, cities, defenseBases, missiles, gameOver, paused, score, onScoreUpdate, waveProgress, maxWaveMissiles, level]);
 
   const resetGame = () => {
     setMissiles([]);
@@ -281,6 +324,7 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
     setDefenseBases(createDefenseBases());
     setScore(0);
     setLevel(1);
+    setWaveProgress(0);
     setSelectedBase(0);
     setGameOver(false);
     setPaused(false);
@@ -332,13 +376,18 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
       }
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('click', handleClick);
+    const gameArea = document.querySelector('[data-game="missile-defense"]');
+    if (gameArea) {
+      gameArea.addEventListener('mousemove', handleMouseMove);
+      gameArea.addEventListener('click', handleClick);
+    }
     window.addEventListener('keydown', handleKeyPress);
     
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('click', handleClick);
+      if (gameArea) {
+        gameArea.removeEventListener('mousemove', handleMouseMove);
+        gameArea.removeEventListener('click', handleClick);
+      }
       window.removeEventListener('keydown', handleKeyPress);
     };
   }, [fireDefenseMissile]);
@@ -348,7 +397,7 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
       updateMissiles();
       updateExplosions();
       checkCollisions();
-    }, 50);
+    }, 16);
 
     return () => clearInterval(gameInterval);
   }, [updateMissiles, updateExplosions, checkCollisions]);
@@ -360,11 +409,14 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
           <div className="text-cyan-400 retro-font">
             <div className="text-lg font-bold">MISSILE DEFENSE</div>
             <div className="text-sm">Score: {score} | Level: {level}</div>
-            <div className="text-sm">Cities: {cities.filter(c => c.active).length}/6</div>
+            <div className="text-sm">Cities: {cities.filter(c => c.active).length}/6 | Wave: {waveProgress}/{maxWaveMissiles + level * 5}</div>
           </div>
           <div className="flex items-center space-x-4">
             <div className="text-cyan-400 retro-font text-sm">
-              Base {selectedBase + 1}: {defenseBases[selectedBase]?.missiles || 0} missiles
+              <div>Base {selectedBase + 1}: {defenseBases[selectedBase]?.missiles || 0} missiles</div>
+              <div className={defenseBases[selectedBase]?.reloadTimer > 0 ? 'text-red-400' : ''}>
+                {defenseBases[selectedBase]?.reloadTimer > 0 ? 'RELOADING...' : 'READY'}
+              </div>
             </div>
             <div className="flex space-x-2">
               <button
@@ -385,92 +437,127 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
         </div>
 
         <div
+          data-game="missile-defense"
           className="relative bg-gradient-to-b from-blue-900 to-black border-2 border-gray-600 overflow-hidden cursor-crosshair"
           style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
         >
           {/* Cities */}
           {cities.map((city, index) => (
-            <div
-              key={index}
-              className={`absolute ${
-                city.active ? 
-                  city.health === 3 ? 'bg-green-400' :
-                  city.health === 2 ? 'bg-yellow-400' : 'bg-red-400'
-                : 'bg-gray-600'
-              }`}
-              style={{
-                left: city.x,
-                top: city.y,
-                width: CITY_WIDTH,
-                height: CITY_HEIGHT
-              }}
-            />
+            <div key={index}>
+              {city.active && (
+                <div
+                  className={`absolute border-2 ${
+                    city.health === 3 ? 'bg-blue-400 border-blue-300' :
+                    city.health === 2 ? 'bg-yellow-400 border-yellow-300' :
+                    'bg-red-400 border-red-300'
+                  }`}
+                  style={{
+                    left: city.x,
+                    top: city.y,
+                    width: CITY_WIDTH,
+                    height: CITY_HEIGHT,
+                    boxShadow: '0 0 8px rgba(0,255,255,0.5)'
+                  }}
+                >
+                  <div className="text-white text-xs text-center leading-3 pt-1">
+                    🏙️
+                  </div>
+                  <div className="text-white text-xs text-center">
+                    {Math.floor(city.population / 1000)}K
+                  </div>
+                </div>
+              )}
+            </div>
           ))}
 
-          {/* Defense bases */}
+          {/* Defense Bases */}
           {defenseBases.map((base, index) => (
-            <div
-              key={index}
-              className={`absolute border-2 ${
-                base.active ? 
-                  selectedBase === index ? 'bg-cyan-400 border-cyan-300' : 'bg-blue-400 border-blue-300'
-                : 'bg-gray-600 border-gray-500'
-              }`}
-              style={{
-                left: base.x,
-                top: base.y,
-                width: 50,
-                height: 30
-              }}
-            >
-              <div className="text-xs text-center text-black font-bold mt-1">
-                {base.missiles}
-              </div>
+            <div key={index}>
+              {base.active && (
+                <div
+                  className={`absolute border-2 ${
+                    index === selectedBase ? 'bg-green-400 border-green-300 shadow-lg' : 'bg-gray-400 border-gray-300'
+                  }`}
+                  style={{
+                    left: base.x,
+                    top: base.y,
+                    width: 50,
+                    height: 50,
+                    borderRadius: '50%',
+                    boxShadow: index === selectedBase ? '0 0 15px lime' : '0 0 5px gray'
+                  }}
+                >
+                  <div className="w-full h-full flex flex-col items-center justify-center text-white text-xs font-bold">
+                    <div>🚀</div>
+                    <div>{base.missiles}</div>
+                  </div>
+                  {/* Range indicator for selected base */}
+                  {index === selectedBase && (
+                    <div
+                      className="absolute border border-green-400 rounded-full pointer-events-none"
+                      style={{
+                        left: -base.range + 25,
+                        top: -base.range + 25,
+                        width: base.range * 2,
+                        height: base.range * 2,
+                        opacity: 0.3
+                      }}
+                    />
+                  )}
+                </div>
+              )}
             </div>
           ))}
 
           {/* Missiles */}
           {missiles.map((missile, index) => (
             <div key={index}>
+              {/* Missile trail */}
+              {missile.trail.map((pos, trailIndex) => (
+                <div
+                  key={`trail-${index}-${trailIndex}`}
+                  className={`absolute rounded-full ${
+                    missile.type === 'defense' ? 'bg-cyan-400' : 'bg-red-400'
+                  }`}
+                  style={{
+                    left: pos.x - 1,
+                    top: pos.y - 1,
+                    width: 2,
+                    height: 2,
+                    opacity: (trailIndex + 1) / missile.trail.length * 0.7
+                  }}
+                />
+              ))}
+              {/* Missile */}
               <div
-                className={`absolute rounded-full ${
-                  missile.type === 'enemy' ? 'bg-red-400' : 'bg-cyan-400'
-                }`}
+                className={`absolute ${
+                  missile.type === 'defense' ? 'bg-cyan-400' : 'bg-red-400'
+                } rounded-full shadow-lg`}
                 style={{
                   left: missile.x - 3,
                   top: missile.y - 3,
                   width: 6,
-                  height: 6
+                  height: 6,
+                  boxShadow: `0 0 8px ${missile.type === 'defense' ? 'cyan' : 'red'}`
                 }}
               />
-              {/* Missile trail */}
-              <svg className="absolute inset-0 pointer-events-none">
-                <line
-                  x1={missile.x}
-                  y1={missile.y}
-                  x2={missile.targetX}
-                  y2={missile.targetY}
-                  stroke={missile.type === 'enemy' ? '#ff6b6b' : '#22d3ee'}
-                  strokeWidth="1"
-                  strokeDasharray="2,2"
-                  opacity="0.5"
-                />
-              </svg>
             </div>
           ))}
 
           {/* Explosions */}
           {explosions.map((explosion, index) => (
             <div
-              key={index}
-              className={`absolute rounded-full ${
-                explosion.type === 'defense' ? 'bg-cyan-400' : 'bg-red-400'
-              } opacity-80`}
+              key={`explosion-${index}`}
+              className={`absolute rounded-full border-2 ${
+                explosion.type === 'defense' ? 'bg-cyan-400 border-cyan-300' : 'bg-red-400 border-red-300'
+              }`}
               style={{
                 left: explosion.x - explosion.radius,
                 top: explosion.y - explosion.radius,
                 width: explosion.radius * 2,
-                height: explosion.radius * 2
+                height: explosion.radius * 2,
+                opacity: explosion.growing ? 0.8 : 0.6,
+                boxShadow: `0 0 ${explosion.radius}px ${explosion.type === 'defense' ? 'cyan' : 'red'}`
               }}
             />
           ))}
@@ -478,15 +565,19 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
           {/* Crosshair */}
           <div
             className="absolute pointer-events-none"
-            style={{ left: mousePos.x - 10, top: mousePos.y - 10 }}
+            style={{ left: mousePos.x - 15, top: mousePos.y - 15 }}
           >
-            <div className="w-5 h-1 bg-cyan-400" />
-            <div className="w-1 h-5 bg-cyan-400 absolute top-0 left-2" />
+            <div className="w-8 h-1 bg-cyan-400" />
+            <div className="w-1 h-8 bg-cyan-400 absolute top-0 left-3.5" />
+            <div className="absolute top-3.5 left-8 text-cyan-400 text-xs">
+              {Math.round(mousePos.x)},{Math.round(mousePos.y)}
+            </div>
           </div>
         </div>
 
-        <div className="mt-4 text-center text-sm text-cyan-400 retro-font">
-          <p>Click to fire defensive missiles • 1/2/3 - Select base • Protect your cities!</p>
+        <div className="mt-4 text-center text-sm text-cyan-400 retro-font space-y-1">
+          <p><strong>Click</strong> to fire defensive missiles • <strong>1/2/3</strong> Select base • <strong>P</strong> Pause</p>
+          <p>Protect your cities! Intercept incoming missiles with defensive explosions!</p>
         </div>
 
         {gameOver && (
@@ -497,7 +588,7 @@ const MissileDefense: React.FC<MissileDefenseProps> = ({ onScoreUpdate }) => {
               onClick={resetGame}
               className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded font-bold border-2 border-cyan-400"
             >
-              PLAY AGAIN
+              DEFEND AGAIN
             </button>
           </div>
         )}

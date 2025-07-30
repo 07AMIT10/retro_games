@@ -26,16 +26,28 @@ interface Bullet extends Position {
 
 interface Segment extends Position {
   id: number;
+  isHead: boolean;
+  direction: 'left' | 'right';
+  speed: number;
 }
 
 interface Mushroom extends Position {
   hits: number;
   maxHits: number;
+  poisoned: boolean;
 }
 
 interface PowerUp extends Position {
-  type: 'laser' | 'spread' | 'rapid' | 'shield';
+  type: 'laser' | 'spread' | 'rapid' | 'shield' | 'bomb';
   active: boolean;
+  timer: number;
+}
+
+interface Spider extends Position {
+  active: boolean;
+  vx: number;
+  vy: number;
+  points: number;
 }
 
 const CentipedeShooter: React.FC<CentipedeShooterProps> = ({ onScoreUpdate }) => {
@@ -47,67 +59,107 @@ const CentipedeShooter: React.FC<CentipedeShooterProps> = ({ onScoreUpdate }) =>
   const [centipede, setCentipede] = useState<Segment[]>([]);
   const [mushrooms, setMushrooms] = useState<Mushroom[]>([]);
   const [powerUps, setPowerUps] = useState<PowerUp[]>([]);
+  const [spiders, setSpiders] = useState<Spider[]>([]);
   const [score, setScore] = useState(0);
   const [lives, setLives] = useState(3);
   const [level, setLevel] = useState(1);
   const [gameOver, setGameOver] = useState(false);
   const [paused, setPaused] = useState(false);
   const [keys, setKeys] = useState<Set<string>>(new Set());
-  const [weaponType, setWeaponType] = useState<'normal' | 'laser' | 'spread'>('normal');
+  const [weaponType, setWeaponType] = useState<'normal' | 'laser' | 'spread' | 'rapid'>('normal');
   const [weaponAmmo, setWeaponAmmo] = useState(0);
   const [shield, setShield] = useState(false);
   const [shieldTimer, setShieldTimer] = useState(0);
-
-  const createCentipede = useCallback((length: number = 12) => {
-    const segments: Segment[] = [];
-    for (let i = 0; i < length; i++) {
-      segments.push({
-        id: i,
-        x: i * SEGMENT_SIZE,
-        y: 50
-      });
-    }
-    return segments;
-  }, []);
+  const [rapidFireTimer, setRapidFireTimer] = useState(0);
 
   const createMushrooms = useCallback(() => {
     const newMushrooms: Mushroom[] = [];
-    const mushroomCount = 20 + level * 3;
+    const mushroomCount = 25 + level * 3;
     
     for (let i = 0; i < mushroomCount; i++) {
-      newMushrooms.push({
-        x: Math.floor(Math.random() * (CANVAS_WIDTH / MUSHROOM_SIZE)) * MUSHROOM_SIZE,
-        y: 100 + Math.floor(Math.random() * ((CANVAS_HEIGHT - 200) / MUSHROOM_SIZE)) * MUSHROOM_SIZE,
-        hits: 0,
-        maxHits: 3
-      });
+      let x, y;
+      let attempts = 0;
+      
+      do {
+        x = Math.floor(Math.random() * (CANVAS_WIDTH / MUSHROOM_SIZE)) * MUSHROOM_SIZE;
+        y = Math.floor(Math.random() * (CANVAS_HEIGHT * 0.7 / MUSHROOM_SIZE)) * MUSHROOM_SIZE;
+        attempts++;
+      } while (attempts < 50 && newMushrooms.some(m => 
+        Math.abs(m.x - x) < MUSHROOM_SIZE * 2 && Math.abs(m.y - y) < MUSHROOM_SIZE * 2
+      ));
+      
+      if (attempts < 50) {
+        newMushrooms.push({
+          x,
+          y,
+          hits: 0,
+          maxHits: 3 + Math.floor(level / 3),
+          poisoned: false
+        });
+      }
     }
     return newMushrooms;
   }, [level]);
 
+  const createCentipede = useCallback((length: number) => {
+    const newSegments: Segment[] = [];
+    const startX = Math.random() * (CANVAS_WIDTH - length * SEGMENT_SIZE);
+    const speed = 1 + level * 0.2;
+    
+    for (let i = 0; i < length; i++) {
+      newSegments.push({
+        id: i,
+        x: startX + i * SEGMENT_SIZE,
+        y: 0,
+        isHead: i === 0,
+        direction: 'right',
+        speed
+      });
+    }
+    return newSegments;
+  }, [level]);
+
   const spawnPowerUp = useCallback(() => {
-    if (Math.random() < 0.05) {
-      const types: PowerUp['type'][] = ['laser', 'spread', 'rapid', 'shield'];
+    if (Math.random() < 0.01 && powerUps.length < 3) {
+      const types: PowerUp['type'][] = ['laser', 'spread', 'rapid', 'shield', 'bomb'];
       setPowerUps(prev => [...prev, {
         x: Math.random() * (CANVAS_WIDTH - POWERUP_SIZE),
         y: 50,
         type: types[Math.floor(Math.random() * types.length)],
-        active: true
+        active: true,
+        timer: 600 // 10 seconds at 60fps
       }]);
     }
-  }, []);
+  }, [powerUps.length]);
+
+  const spawnSpider = useCallback(() => {
+    if (Math.random() < 0.003 && spiders.length < 2) {
+      const fromLeft = Math.random() > 0.5;
+      setSpiders(prev => [...prev, {
+        x: fromLeft ? -20 : CANVAS_WIDTH + 20,
+        y: CANVAS_HEIGHT - 150 + Math.random() * 100,
+        active: true,
+        vx: fromLeft ? 2 + Math.random() * 2 : -(2 + Math.random() * 2),
+        vy: (Math.random() - 0.5) * 3,
+        points: 300 + Math.floor(Math.random() * 500)
+      }]);
+    }
+  }, [spiders.length]);
 
   const shoot = useCallback(() => {
     if (gameOver || paused) return;
     
-    if (weaponType === 'normal') {
+    const canShoot = rapidFireTimer > 0 || bullets.length < (weaponType === 'rapid' ? 6 : 3);
+    if (!canShoot) return;
+    
+    if (weaponType === 'normal' || weaponAmmo <= 0) {
       setBullets(prev => [
         ...prev,
         {
           x: player.x + PLAYER_SIZE / 2,
           y: player.y,
           active: true,
-          vy: -8,
+          vy: -10,
           type: 'normal'
         }
       ]);
@@ -118,7 +170,7 @@ const CentipedeShooter: React.FC<CentipedeShooterProps> = ({ onScoreUpdate }) =>
           x: player.x + PLAYER_SIZE / 2,
           y: player.y,
           active: true,
-          vy: -12,
+          vy: -15,
           type: 'laser'
         }
       ]);
@@ -128,17 +180,28 @@ const CentipedeShooter: React.FC<CentipedeShooterProps> = ({ onScoreUpdate }) =>
         setBullets(prev => [
           ...prev,
           {
-            x: player.x + PLAYER_SIZE / 2 + i * 10,
+            x: player.x + PLAYER_SIZE / 2 + i * 15,
             y: player.y,
             active: true,
-            vy: -7,
+            vy: -8,
             type: 'spread'
           }
         ]);
       }
       setWeaponAmmo(prev => prev - 1);
+    } else if (weaponType === 'rapid') {
+      setBullets(prev => [
+        ...prev,
+        {
+          x: player.x + PLAYER_SIZE / 2,
+          y: player.y,
+          active: true,
+          vy: -12,
+          type: 'normal'
+        }
+      ]);
     }
-  }, [player, weaponType, weaponAmmo, gameOver, paused]);
+  }, [player, weaponType, weaponAmmo, gameOver, paused, bullets.length, rapidFireTimer]);
 
   const updatePlayer = useCallback(() => {
     if (gameOver || paused) return;
@@ -148,16 +211,16 @@ const CentipedeShooter: React.FC<CentipedeShooterProps> = ({ onScoreUpdate }) =>
       let newY = prev.y;
 
       if (keys.has('ArrowLeft')) {
-        newX = Math.max(0, prev.x - 5);
+        newX = Math.max(0, prev.x - 6);
       }
       if (keys.has('ArrowRight')) {
-        newX = Math.min(CANVAS_WIDTH - PLAYER_SIZE, prev.x + 5);
+        newX = Math.min(CANVAS_WIDTH - PLAYER_SIZE, prev.x + 6);
       }
       if (keys.has('ArrowUp')) {
-        newY = Math.max(CANVAS_HEIGHT / 2, prev.y - 5);
+        newY = Math.max(CANVAS_HEIGHT / 2, prev.y - 6);
       }
       if (keys.has('ArrowDown')) {
-        newY = Math.min(CANVAS_HEIGHT - PLAYER_SIZE, prev.y + 5);
+        newY = Math.min(CANVAS_HEIGHT - PLAYER_SIZE, prev.y + 6);
       }
 
       return { x: newX, y: newY };
@@ -179,43 +242,46 @@ const CentipedeShooter: React.FC<CentipedeShooterProps> = ({ onScoreUpdate }) =>
   const updateCentipede = useCallback(() => {
     if (gameOver || paused) return;
 
-    setCentipede(prevSegments => {
-      if (prevSegments.length === 0) {
-        return createCentipede(12 + level);
-      }
-
-      return prevSegments.map((segment, index) => {
+    setCentipede(prev => {
+      return prev.map(segment => {
         let newX = segment.x;
         let newY = segment.y;
+        let newDirection = segment.direction;
 
-        // Move right until hitting edge or mushroom
-        newX += 2;
-
-        if (newX >= CANVAS_WIDTH - SEGMENT_SIZE) {
-          newX = CANVAS_WIDTH - SEGMENT_SIZE;
-          newY += SEGMENT_SIZE;
+        // Move horizontally
+        if (segment.direction === 'right') {
+          newX += segment.speed;
+        } else {
+          newX -= segment.speed;
         }
 
-        // Check mushroom collision
+        // Check bounds and mushroom collisions
+        const hitBound = newX <= 0 || newX >= CANVAS_WIDTH - SEGMENT_SIZE;
         const hitMushroom = mushrooms.some(mushroom => 
           newX < mushroom.x + MUSHROOM_SIZE &&
           newX + SEGMENT_SIZE > mushroom.x &&
           newY < mushroom.y + MUSHROOM_SIZE &&
-          newY + SEGMENT_SIZE > mushroom.y &&
-          mushroom.hits < mushroom.maxHits
+          newY + SEGMENT_SIZE > mushroom.y
         );
 
-        if (hitMushroom) {
+        if (hitBound || hitMushroom) {
           newY += SEGMENT_SIZE;
-          newX = segment.x - 2;
+          newDirection = segment.direction === 'right' ? 'left' : 'right';
+          newX = segment.x; // Don't move horizontally this frame
         }
 
-        return { ...segment, x: newX, y: newY };
+        return { 
+          ...segment, 
+          x: newX, 
+          y: newY, 
+          direction: newDirection 
+        };
       });
     });
 
     spawnPowerUp();
-  }, [gameOver, paused, mushrooms, createCentipede, level, spawnPowerUp]);
+    spawnSpider();
+  }, [gameOver, paused, mushrooms, spawnPowerUp, spawnSpider]);
 
   const updatePowerUps = useCallback(() => {
     if (gameOver || paused) return;
@@ -224,8 +290,22 @@ const CentipedeShooter: React.FC<CentipedeShooterProps> = ({ onScoreUpdate }) =>
       prev.map(powerUp => ({
         ...powerUp,
         y: powerUp.y + 2,
-        active: powerUp.active && powerUp.y < CANVAS_HEIGHT
+        timer: powerUp.timer - 1,
+        active: powerUp.active && powerUp.y < CANVAS_HEIGHT && powerUp.timer > 0
       })).filter(powerUp => powerUp.active)
+    );
+  }, [gameOver, paused]);
+
+  const updateSpiders = useCallback(() => {
+    if (gameOver || paused) return;
+
+    setSpiders(prev => 
+      prev.map(spider => ({
+        ...spider,
+        x: spider.x + spider.vx,
+        y: spider.y + spider.vy,
+        active: spider.active && spider.x > -50 && spider.x < CANVAS_WIDTH + 50
+      })).filter(spider => spider.active)
     );
   }, [gameOver, paused]);
 
@@ -251,23 +331,28 @@ const CentipedeShooter: React.FC<CentipedeShooterProps> = ({ onScoreUpdate }) =>
               bullet.y <= segment.y + SEGMENT_SIZE
             ) {
               newBullets[bulletIndex] = { ...bullet, active: false };
-              newSegments.splice(segmentIndex, 1);
-              pointsEarned += 10;
+              
+              const isHead = segment.isHead;
+              pointsEarned += isHead ? 100 : 10;
 
               // Add mushroom where segment was hit
               setMushrooms(prevMushrooms => [...prevMushrooms, { 
                 x: segment.x, 
                 y: segment.y, 
                 hits: 0, 
-                maxHits: 3 
+                maxHits: 3,
+                poisoned: false
               }]);
 
-              // Split centipede if hit in middle
+              // Remove segment and split centipede if necessary
+              newSegments.splice(segmentIndex, 1);
+              
+              // If we hit a middle segment, split the centipede
               if (segmentIndex < newSegments.length) {
-                // Create new centipede from remaining segments
                 const remainingSegments = newSegments.slice(segmentIndex);
                 remainingSegments.forEach((seg, i) => {
                   seg.id = newSegments.length + i;
+                  if (i === 0) seg.isHead = true;
                 });
               }
             }
@@ -306,8 +391,7 @@ const CentipedeShooter: React.FC<CentipedeShooterProps> = ({ onScoreUpdate }) =>
               bullet.x >= mushroom.x && 
               bullet.x <= mushroom.x + MUSHROOM_SIZE &&
               bullet.y >= mushroom.y && 
-              bullet.y <= mushroom.y + MUSHROOM_SIZE &&
-              mushroom.hits < mushroom.maxHits
+              bullet.y <= mushroom.y + MUSHROOM_SIZE
             ) {
               if (bullet.type === 'laser') {
                 // Laser destroys mushroom instantly
@@ -335,6 +419,41 @@ const CentipedeShooter: React.FC<CentipedeShooterProps> = ({ onScoreUpdate }) =>
       return newBullets.filter(bullet => bullet.active);
     });
 
+    // Bullets vs spiders
+    setBullets(prevBullets => {
+      let newBullets = [...prevBullets];
+      
+      setSpiders(prevSpiders => {
+        let newSpiders = [...prevSpiders];
+        let pointsEarned = 0;
+
+        newBullets.forEach((bullet, bulletIndex) => {
+          if (!bullet.active) return;
+
+          newSpiders.forEach((spider, spiderIndex) => {
+            if (
+              bullet.x >= spider.x && 
+              bullet.x <= spider.x + 30 &&
+              bullet.y >= spider.y && 
+              bullet.y <= spider.y + 20
+            ) {
+              newBullets[bulletIndex] = { ...bullet, active: false };
+              pointsEarned += spider.points;
+              newSpiders[spiderIndex] = { ...spider, active: false };
+            }
+          });
+        });
+
+        if (pointsEarned > 0) {
+          setScore(prev => prev + pointsEarned);
+        }
+
+        return newSpiders.filter(spider => spider.active);
+      });
+
+      return newBullets.filter(bullet => bullet.active);
+    });
+
     // Player vs centipede
     if (!shield) {
       const playerHit = centipede.some(segment =>
@@ -357,6 +476,28 @@ const CentipedeShooter: React.FC<CentipedeShooterProps> = ({ onScoreUpdate }) =>
       }
     }
 
+    // Player vs spiders
+    if (!shield) {
+      const spiderHit = spiders.some(spider =>
+        spider.active &&
+        player.x < spider.x + 30 &&
+        player.x + PLAYER_SIZE > spider.x &&
+        player.y < spider.y + 20 &&
+        player.y + PLAYER_SIZE > spider.y
+      );
+
+      if (spiderHit) {
+        setLives(prev => {
+          const newLives = prev - 1;
+          if (newLives <= 0) {
+            setGameOver(true);
+            if (onScoreUpdate) onScoreUpdate(score);
+          }
+          return newLives;
+        });
+      }
+    }
+
     // Player vs power-ups
     setPowerUps(prevPowerUps => {
       return prevPowerUps.filter(powerUp => {
@@ -371,18 +512,24 @@ const CentipedeShooter: React.FC<CentipedeShooterProps> = ({ onScoreUpdate }) =>
           switch (powerUp.type) {
             case 'laser':
               setWeaponType('laser');
-              setWeaponAmmo(20);
+              setWeaponAmmo(25);
               break;
             case 'spread':
               setWeaponType('spread');
-              setWeaponAmmo(15);
+              setWeaponAmmo(20);
               break;
             case 'rapid':
-              // Temporary rapid fire (handled in shooting logic)
+              setRapidFireTimer(300); // 5 seconds
               break;
             case 'shield':
               setShield(true);
-              setShieldTimer(300); // 5 seconds at 60fps
+              setShieldTimer(300);
+              break;
+            case 'bomb':
+              // Clear all enemies on screen
+              setCentipede([]);
+              setSpiders([]);
+              setScore(prev => prev + 500);
               break;
           }
           return false; // Remove power-up
@@ -390,14 +537,45 @@ const CentipedeShooter: React.FC<CentipedeShooterProps> = ({ onScoreUpdate }) =>
         return true;
       });
     });
-  }, [centipede, player, shield, gameOver, paused, level, createMushrooms, createCentipede, score, onScoreUpdate]);
+
+    // Check centipede reaching bottom
+    const reachedBottom = centipede.some(segment => segment.y >= CANVAS_HEIGHT - 60);
+    if (reachedBottom) {
+      setGameOver(true);
+      if (onScoreUpdate) onScoreUpdate(score);
+    }
+  }, [centipede, player, shield, spiders, powerUps, gameOver, paused, level, createMushrooms, createCentipede, score, onScoreUpdate]);
+
+  // Update timers
+  useEffect(() => {
+    if (shieldTimer > 0) {
+      const timer = setTimeout(() => setShieldTimer(prev => prev - 1), 16);
+      return () => clearTimeout(timer);
+    } else {
+      setShield(false);
+    }
+  }, [shieldTimer]);
+
+  useEffect(() => {
+    if (rapidFireTimer > 0) {
+      const timer = setTimeout(() => setRapidFireTimer(prev => prev - 1), 16);
+      return () => clearTimeout(timer);
+    }
+  }, [rapidFireTimer]);
+
+  useEffect(() => {
+    if (weaponAmmo <= 0 && weaponType !== 'normal') {
+      setWeaponType('normal');
+    }
+  }, [weaponAmmo, weaponType]);
 
   const resetGame = () => {
     setPlayer({ x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT - 50 });
     setBullets([]);
-    setCentipede(createCentipede());
+    setCentipede(createCentipede(12));
     setMushrooms(createMushrooms());
     setPowerUps([]);
+    setSpiders([]);
     setScore(0);
     setLives(3);
     setLevel(1);
@@ -405,38 +583,19 @@ const CentipedeShooter: React.FC<CentipedeShooterProps> = ({ onScoreUpdate }) =>
     setWeaponAmmo(0);
     setShield(false);
     setShieldTimer(0);
+    setRapidFireTimer(0);
     setGameOver(false);
     setPaused(false);
   };
 
   useEffect(() => {
     if (centipede.length === 0) {
-      setCentipede(createCentipede());
+      setCentipede(createCentipede(12));
     }
     if (mushrooms.length === 0) {
       setMushrooms(createMushrooms());
     }
   }, [centipede.length, mushrooms.length, createCentipede, createMushrooms]);
-
-  useEffect(() => {
-    if (shield && shieldTimer > 0) {
-      const timer = setTimeout(() => {
-        setShieldTimer(prev => prev - 1);
-      }, 16);
-
-      if (shieldTimer <= 0) {
-        setShield(false);
-      }
-
-      return () => clearTimeout(timer);
-    }
-  }, [shield, shieldTimer]);
-
-  useEffect(() => {
-    if (weaponAmmo <= 0 && weaponType !== 'normal') {
-      setWeaponType('normal');
-    }
-  }, [weaponAmmo, weaponType]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -483,18 +642,20 @@ const CentipedeShooter: React.FC<CentipedeShooterProps> = ({ onScoreUpdate }) =>
       updateBullets();
       updateCentipede();
       updatePowerUps();
+      updateSpiders();
       checkCollisions();
     }, 16);
 
     return () => clearInterval(gameInterval);
-  }, [updatePlayer, updateBullets, updateCentipede, updatePowerUps, checkCollisions]);
+  }, [updatePlayer, updateBullets, updateCentipede, updatePowerUps, updateSpiders, checkCollisions]);
 
   const getPowerUpColor = (type: PowerUp['type']) => {
     switch (type) {
       case 'laser': return 'bg-red-400';
       case 'spread': return 'bg-blue-400';
-      case 'rapid': return 'bg-green-400';
+      case 'rapid': return 'bg-yellow-400';
       case 'shield': return 'bg-purple-400';
+      case 'bomb': return 'bg-orange-400';
     }
   };
 
@@ -503,12 +664,12 @@ const CentipedeShooter: React.FC<CentipedeShooterProps> = ({ onScoreUpdate }) =>
       <div className="bg-gray-900 border-2 border-cyan-400 rounded-lg p-6 shadow-2xl retro-glow">
         <div className="flex items-center justify-between mb-4">
           <div className="text-cyan-400 retro-font">
-            <div className="text-lg font-bold">CENTIPEDE+</div>
+            <div className="text-lg font-bold">CENTIPEDE SHOOTER</div>
             <div className="text-sm">Score: {score} | Lives: {lives} | Level: {level}</div>
             <div className="text-sm">
               Weapon: {weaponType.toUpperCase()} 
               {weaponAmmo > 0 && ` (${weaponAmmo})`}
-              {shield && ` | SHIELD: ${Math.ceil(shieldTimer / 60)}s`}
+              {rapidFireTimer > 0 && ' + RAPID'}
             </div>
           </div>
           <div className="flex space-x-2">
@@ -529,22 +690,40 @@ const CentipedeShooter: React.FC<CentipedeShooterProps> = ({ onScoreUpdate }) =>
         </div>
 
         <div
-          className="relative bg-black border-2 border-gray-600 overflow-hidden"
+          className="relative bg-gradient-to-b from-green-900 to-black border-2 border-gray-600 overflow-hidden"
           style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
         >
-          {/* Mushrooms */}
-          {mushrooms.map((mushroom, index) => (
+          {/* Player */}
+          <div
+            className={`absolute rounded shadow-lg ${
+              shield ? 'bg-purple-400 animate-pulse' : 'bg-cyan-400'
+            }`}
+            style={{
+              left: player.x,
+              top: player.y,
+              width: PLAYER_SIZE,
+              height: PLAYER_SIZE,
+              clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)',
+              boxShadow: shield ? '0 0 15px purple' : '0 0 10px cyan'
+            }}
+          />
+
+          {/* Bullets */}
+          {bullets.map((bullet, index) => (
             <div
               key={index}
-              className={`absolute rounded ${
-                mushroom.hits === 0 ? 'bg-yellow-400' :
-                mushroom.hits === 1 ? 'bg-yellow-500' : 'bg-orange-400'
+              className={`absolute rounded-full shadow-lg ${
+                bullet.type === 'laser' ? 'bg-red-400' :
+                bullet.type === 'spread' ? 'bg-blue-400' : 'bg-white'
               }`}
               style={{
-                left: mushroom.x,
-                top: mushroom.y,
-                width: MUSHROOM_SIZE,
-                height: MUSHROOM_SIZE
+                left: bullet.x - BULLET_SIZE / 2,
+                top: bullet.y - BULLET_SIZE / 2,
+                width: bullet.type === 'laser' ? BULLET_SIZE * 2 : BULLET_SIZE,
+                height: bullet.type === 'laser' ? BULLET_SIZE * 3 : BULLET_SIZE,
+                boxShadow: `0 0 5px ${
+                  bullet.type === 'laser' ? 'red' : bullet.type === 'spread' ? 'blue' : 'white'
+                }`
               }}
             />
           ))}
@@ -553,64 +732,108 @@ const CentipedeShooter: React.FC<CentipedeShooterProps> = ({ onScoreUpdate }) =>
           {centipede.map((segment, index) => (
             <div
               key={segment.id}
-              className={`absolute rounded ${
-                index === 0 ? 'bg-red-400' : 'bg-green-400'
+              className={`absolute border border-white shadow-lg ${
+                segment.isHead ? 'bg-red-500' : 'bg-green-500'
               }`}
               style={{
                 left: segment.x,
                 top: segment.y,
                 width: SEGMENT_SIZE,
-                height: SEGMENT_SIZE
+                height: SEGMENT_SIZE,
+                borderRadius: '50%',
+                boxShadow: `0 0 8px ${segment.isHead ? 'red' : 'green'}`
               }}
-            />
+            >
+              <div className="w-full h-full flex items-center justify-center text-white text-xs font-bold">
+                {segment.isHead ? '🐛' : '●'}
+              </div>
+            </div>
+          ))}
+
+          {/* Mushrooms */}
+          {mushrooms.map((mushroom, index) => (
+            <div
+              key={index}
+              className={`absolute border shadow-lg ${
+                mushroom.poisoned ? 'bg-purple-400 border-purple-300' :
+                mushroom.hits === 0 ? 'bg-green-400 border-green-300' :
+                mushroom.hits === 1 ? 'bg-yellow-400 border-yellow-300' :
+                'bg-red-400 border-red-300'
+              }`}
+              style={{
+                left: mushroom.x,
+                top: mushroom.y,
+                width: MUSHROOM_SIZE,
+                height: MUSHROOM_SIZE,
+                opacity: 0.8
+              }}
+            >
+              <div className="w-full h-full flex items-center justify-center text-white text-xs">
+                🍄
+              </div>
+            </div>
           ))}
 
           {/* Power-ups */}
           {powerUps.map((powerUp, index) => (
             <div
               key={index}
-              className={`absolute ${getPowerUpColor(powerUp.type)} rounded-full animate-pulse`}
+              className={`absolute ${getPowerUpColor(powerUp.type)} border-2 border-white rounded shadow-lg animate-pulse`}
               style={{
                 left: powerUp.x,
                 top: powerUp.y,
                 width: POWERUP_SIZE,
-                height: POWERUP_SIZE
+                height: POWERUP_SIZE,
+                boxShadow: '0 0 10px white'
               }}
-            />
+            >
+              <div className="w-full h-full flex items-center justify-center text-white text-xs font-bold">
+                {powerUp.type === 'laser' ? '⚡' :
+                 powerUp.type === 'spread' ? '💥' :
+                 powerUp.type === 'rapid' ? '⚡' :
+                 powerUp.type === 'shield' ? '🛡️' :
+                 '💣'}
+              </div>
+            </div>
           ))}
 
-          {/* Player */}
-          <div
-            className={`absolute rounded ${shield ? 'bg-purple-400 animate-pulse' : 'bg-cyan-400'}`}
-            style={{
-              left: player.x,
-              top: player.y,
-              width: PLAYER_SIZE,
-              height: PLAYER_SIZE,
-              clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)'
-            }}
-          />
-
-          {/* Bullets */}
-          {bullets.map((bullet, index) => (
+          {/* Spiders */}
+          {spiders.map((spider, index) => (
             <div
               key={index}
-              className={`absolute rounded-full ${
-                bullet.type === 'laser' ? 'bg-red-400' :
-                bullet.type === 'spread' ? 'bg-blue-400' : 'bg-white'
-              }`}
+              className="absolute bg-orange-500 border border-white rounded shadow-lg"
               style={{
-                left: bullet.x - BULLET_SIZE / 2,
-                top: bullet.y - BULLET_SIZE / 2,
-                width: BULLET_SIZE,
-                height: BULLET_SIZE
+                left: spider.x,
+                top: spider.y,
+                width: 30,
+                height: 20,
+                boxShadow: '0 0 8px orange'
               }}
-            />
+            >
+              <div className="w-full h-full flex items-center justify-center text-white text-xs font-bold">
+                🕷️
+              </div>
+            </div>
           ))}
+
+          {/* Shield indicator */}
+          {shield && (
+            <div className="absolute top-4 left-4 bg-purple-900 border border-purple-400 p-2 rounded">
+              <div className="text-purple-400 text-xs retro-font">SHIELD: {Math.ceil(shieldTimer / 60)}s</div>
+            </div>
+          )}
+
+          {/* Rapid fire indicator */}
+          {rapidFireTimer > 0 && (
+            <div className="absolute top-4 right-4 bg-yellow-900 border border-yellow-400 p-2 rounded">
+              <div className="text-yellow-400 text-xs retro-font">RAPID: {Math.ceil(rapidFireTimer / 60)}s</div>
+            </div>
+          )}
         </div>
 
-        <div className="mt-4 text-center text-sm text-cyan-400 retro-font">
-          <p>Arrow Keys - Move • Space - Shoot • Collect power-ups for special weapons!</p>
+        <div className="mt-4 text-center text-sm text-cyan-400 retro-font space-y-1">
+          <p><strong>Arrow Keys</strong> Move • <strong>Space</strong> Shoot • <strong>P</strong> Pause</p>
+          <p>Collect power-ups for special weapons! Don't let the centipede reach the bottom!</p>
         </div>
 
         {gameOver && (
